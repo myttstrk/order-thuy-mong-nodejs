@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Liên hệ | Thủy Mộng</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+    <style>
+      .contact-page {
+        padding: 64px 0 88px;
+      }
+
+      .contact-shell {
+        display: grid;
+        grid-template-columns: 1fr 1.1fr;
+        gap: 28px;
+      }
+
+      .contact-card,
+      .map-card {
+        background: rgba(255, 255, 255, 0.58);
+        border: 1px solid rgba(32, 26, 22, 0.08);
+        border-radius: 26px;
+        padding: 28px;
+        box-shadow: 0 22px 42px rgba(34, 27, 22, 0.08);
+      }
+
+      .contact-list {
+        list-style: none;
+        margin: 24px 0 0;
+        padding: 0;
+        display: grid;
+        gap: 16px;
+      }
+
+      .contact-list li {
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .map-card iframe {
+        width: 100%;
+        min-height: 360px;
+        border: 0;
+        border-radius: 16px;
+      }
+
+      @media (max-width: 760px) {
+        .contact-shell {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container nav-wrap">
+        <div class="brand-block">
+          <div class="brand-mark">T</div>
+          <div>
+            <div class="brand-name">Thủy Mộng</div>
+            <small>Múa rối nước</small>
+          </div>
+        </div>
+        <nav class="main-nav">
+          <a href="/">Trang chủ</a>
+          <a href="/#tickets">Vé</a>
+          <a href="/#merch">Merch</a>
+          <a href="/admin">Quản trị</a>
+        </nav>
+        <a class="btn btn-primary" href="/#tickets">Đặt vé</a>
+      </div>
+    </header>
+
+    <main class="contact-page">
+      <div class="container contact-shell">
+        <div class="contact-card">
+          <p class="eyebrow">Liên hệ</p>
+          <h1 style="font-family:'Cormorant Garamond',serif; font-size:3.3rem; margin:0 0 12px;">Nhà Hát Múa Rối Việt Nam</h1>
+          <p style="color: var(--muted); line-height:1.8; margin:0;">Đội ngũ hỗ trợ sự kiện Thủy Mộng luôn sẵn sàng tư vấn và hỗ trợ khách hàng trước, trong và sau buổi diễn.</p>
+          <ul class="contact-list">
+            <li><strong>Đơn vị:</strong> Nhà Hát Múa Rối Việt Nam</li>
+            <li><strong>Địa chỉ:</strong> 361 Trường Chinh, Thanh Xuân, Hà Nội</li>
+            <li><strong>Điện thoại:</strong> 096 775 20 06</li>
+            <li><strong>Email:</strong> thuymongsukien2026@gmail.com</li>
+            <li><strong>Quản trị:</strong> <a href="/admin">/admin</a></li>
+          </ul>
+        </div>
+
+        <div class="map-card">
+          <iframe
+            src="https://www.google.com/maps?q=361%20Tr%C6%B0%E1%BB%9Dng%20Chinh%2C%20Thanh%20Xu%C3%A2n%2C%20H%C3%A0%20N%E1%BB%99i&output=embed"
+            allowfullscreen=""
+            loading="lazy"
+            referrerpolicy="no-referrer-when-downgrade"
+          ></iframe>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-grid">
+        <div>
+          <div class="brand-block small-brand">
+            <div class="brand-mark">T</div>
+            <div>
+              <div class="brand-name">Thủy Mộng</div>
+              <small>Art & Water Performance</small>
+            </div>
+          </div>
+        </div>
+        <div>
+          <h4>Liên hệ</h4>
+          <ul>
+            <li>Nhà Hát Múa Rối Việt Nam</li>
+            <li>361 Trường Chinh, Thanh Xuân, Hà Nội</li>
+          </ul>
+        </div>
+        <div>
+          <h4>Thông tin</h4>
+          <ul>
+            <li>096 775 20 06</li>
+            <li>thuymongsukien2026@gmail.com</li>
+            <li><a href="/admin">Quản trị</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

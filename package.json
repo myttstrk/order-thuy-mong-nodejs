@@ -1,0 +1,26 @@
+{
+  "name": "thuy-mong-ticketing",
+  "version": "1.0.0",
+  "description": "Website bán vé sự kiện múa rối nước Thủy Mộng",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "ticketing",
+    "event",
+    "booking"
+  ],
+  "author": "GitHub Copilot",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^18.0.3",
+    "express": "^4.22.3",
+    "nodemailer": "^6.10.1"
+  },
+  "directories": {
+    "test": "test"
+  }
+}

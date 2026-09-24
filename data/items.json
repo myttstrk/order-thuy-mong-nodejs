@@ -1,0 +1,56 @@
+[
+  {
+    "id": "sao-may",
+    "name": "Sào Mây",
+    "price": 130000,
+    "benefit": "Nhận sticker sự kiện và voucher giảm 5% khi mua khăn độc quyền của sự kiện.",
+    "type": "ticket",
+    "image": "",
+    "baseQuantity": 53
+  },
+  {
+    "id": "thanh-la",
+    "name": "Thanh La",
+    "price": 160000,
+    "benefit": "Nhận sticker sự kiện và voucher giảm 5% khi mua khăn độc quyền của sự kiện.",
+    "type": "ticket",
+    "image": "",
+    "baseQuantity": 76
+  },
+  {
+    "id": "y-mon",
+    "name": "Y môn",
+    "price": 200000,
+    "benefit": "Nhận sticker sự kiện, voucher giảm 5% khi mua khăn của sự kiện và voucher giảm 10.000₫ trong hoạt động \"Tô màu rối gỗ\"",
+    "type": "ticket",
+    "image": "",
+    "baseQuantity": 72
+  },
+  {
+    "id": "tu-linh",
+    "name": "Tứ Linh",
+    "price": 300000,
+    "benefit": "Nhận voucher giảm 15% khi mua khăn độc quyền của sự kiện, tặng 01 combo merch và 01 mô hình rối gỗ trong hoạt động \"Tô màu rối gỗ\"",
+    "type": "ticket",
+    "image": "",
+    "baseQuantity": 60
+  },
+  {
+    "id": "combo-merch",
+    "name": "[Pre-order] Combo merch độc quyền sự kiện",
+    "price": 35000,
+    "benefit": "Quạt, móc khoá, sticker độc quyền",
+    "type": "merch",
+    "image": "",
+    "baseQuantity": 6
+  },
+  {
+    "id": "khan",
+    "name": "[Pre-order] Khăn Bandana độc quyền sự kiện",
+    "price": 119000,
+    "benefit": "Size 60x60cm. Có thể áp dụng ưu đãi giảm giá theo hạng vé",
+    "type": "merch",
+    "image": "",
+    "baseQuantity": 2
+  }
+]

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quản trị | Thủy Mộng</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/admin.css" />
+    <script>
+      // Check auth before rendering
+      if (sessionStorage.getItem('adminAuth') !== 'true') {
+        document.documentElement.style.display = 'none'; // Hide everything temporarily
+        window.addEventListener('DOMContentLoaded', () => {
+          document.documentElement.style.display = '';
+          document.getElementById('authOverlay').style.display = 'flex';
+        });
+      }
+    </script>
+  </head>
+  <body class="admin-body">
+    <!-- Auth Overlay for Mobile Support -->
+    <div id="authOverlay" style="display: none; position: fixed; inset: 0; background: #f3f4f6; z-index: 99999; flex-direction: column; align-items: center; justify-content: center; padding: 20px;">
+      <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 100%;">
+        <h2 style="margin-top: 0; margin-bottom: 20px; font-family: 'Cormorant Garamond', serif; font-size: 28px; color: var(--gold);">Quản Trị Thủy Mộng</h2>
+        <input type="password" id="authPassword" placeholder="Nhập mật khẩu..." style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 16px; box-sizing: border-box; font-size: 16px;" />
+        <button id="authSubmitBtn" class="btn btn-primary" style="width: 100%; padding: 12px;">Đăng nhập</button>
+      </div>
+    </div>
+    
+    <script>
+      document.getElementById('authSubmitBtn').addEventListener('click', () => {
+        const pwd = document.getElementById('authPassword').value;
+        if (pwd === "quangminh") {
+          sessionStorage.setItem('adminAuth', 'true');
+          document.getElementById('authOverlay').style.display = 'none';
+        } else {
+          alert('Mật khẩu sai!');
+        }
+      });
+    </script>
+
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <div class="brand-block admin-brand">
+          <div class="brand-mark">T</div>
+          <div>
+            <div class="brand-name">Thủy Mộng</div>
+            <small>Admin Dashboard</small>
+          </div>
+        </div>
+
+        <nav class="admin-nav">
+          <a href="#overview" class="active">Tổng quan</a>
+          <a href="#orders">Đơn hàng</a>
+          <a href="#items">Mặt hàng</a>
+          <a href="#scanner">Check-in QR</a>
+          <a href="/">Trang sự kiện</a>
+        </nav>
+      </aside>
+
+      <main class="admin-main">
+        <header class="admin-header">
+          <div>
+            <p class="eyebrow dark">Quản trị sự kiện</p>
+            <h1>Dashboard Thủy Mộng</h1>
+          </div>
+          <a class="btn btn-primary" href="/">Xem trang công khai</a>
+        </header>
+
+        <section id="overview" class="summary-grid">
+          <div class="summary-card">
+            <span>Tổng doanh thu</span>
+            <strong id="totalRevenue">0 VNĐ</strong>
+          </div>
+          <div class="summary-card">
+            <span>Tổng đơn</span>
+            <strong id="totalOrders">0</strong>
+          </div>
+          <div class="summary-card">
+            <span>Đã thanh toán</span>
+            <strong id="paidOrders">0</strong>
+          </div>
+          <div class="summary-card">
+            <span>Vé đã sử dụng</span>
+            <strong id="usedTickets">0</strong>
+          </div>
+        </section>
+
+        <section id="orders" class="panel">
+          <div class="panel-header">
+            <h2>Danh sách đơn hàng</h2>
+            <div class="filters">
+              <select id="statusFilter">
+                <option value="all">Tất cả trạng thái</option>
+                <option value="Chờ thanh toán">Chờ thanh toán</option>
+                <option value="Đã thanh toán">Đã thanh toán</option>
+              </select>
+              <input id="searchInput" type="text" placeholder="Tìm theo tên, SĐT, mã đơn" />
+              <button id="refreshOrdersBtn" type="button" class="btn btn-outline" style="color: #000; border-color: #000; font-size: 13px; font-weight: 600; padding: 7px 12px; cursor: pointer; border-radius: 8px;" title="Làm mới danh sách đơn hàng">🔄 Làm mới</button>
+              <button id="exportCsvBtn" type="button" class="btn btn-outline" style="color: #065f46; border-color: #065f46; background: #ecfdf5; font-size: 13px; font-weight: 600; padding: 7px 12px; cursor: pointer; border-radius: 8px;" title="Xuất toàn bộ đơn hàng ra file CSV">📥 Xuất CSV</button>
+              <button id="cleanupOrdersBtn" type="button" class="btn btn-outline" style="color: #b91c1c; border-color: #b91c1c; background: #fef2f2; font-size: 13px; font-weight: 600; padding: 7px 12px; cursor: pointer; border-radius: 8px;" title="Xóa tất cả các đơn hàng chưa thanh toán">🗑️ Xóa tất cả đơn chưa xác nhận</button>
+            </div>
+          </div>
+          <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 10px 14px; margin: 8px 0; font-size: 13px; color: #92400e;">
+            ⚠️ <strong>Lưu ý:</strong> Dữ liệu có thể bị mất khi server Vercel khởi động lại. Hãy thường xuyên nhấn <strong>📥 Xuất CSV</strong> để backup toàn bộ lịch sử đơn hàng về máy.
+          </div>
+          <div class="mobile-table-hint">💡 Vuốt sang ngang để xem đầy đủ thông tin đơn và biên lai →</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mã đơn</th>
+                  <th>Khách hàng</th>
+                  <th>SĐT</th>
+                  <th>Nơi nhận</th>
+                  <th>Hạng/Vật phẩm</th>
+                  <th>Tổng tiền</th>
+                  <th>Ảnh thanh toán</th>
+                  <th>Trạng thái</th>
+                  <th>Check-in</th>
+                  <th>Xóa</th>
+                </tr>
+              </thead>
+              <tbody id="ordersTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="items" class="panel" style="display: none;">
+          <div class="panel-header">
+            <h2>Quản lý mặt hàng (Vé & Merch)</h2>
+            <div style="display: flex; gap: 8px;">
+              <button id="refreshItemsBtn" type="button" class="btn btn-outline" style="color: #000; border-color: #000; font-size: 13px; font-weight: 600; padding: 7px 12px; cursor: pointer; border-radius: 8px;" title="Làm mới danh sách mặt hàng">🔄 Làm mới</button>
+              <button id="addItemBtn" type="button" class="btn btn-primary" style="font-size: 13px; font-weight: 600; padding: 7px 12px; cursor: pointer; border-radius: 8px;">+ Thêm mặt hàng</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Ảnh</th>
+                  <th>Tên</th>
+                  <th>ID</th>
+                  <th>Phân loại</th>
+                  <th>Giá (VNĐ)</th>
+                  <th>Mô tả / Quyền lợi</th>
+                  <th>Hành động</th>
+                </tr>
+              </thead>
+              <tbody id="itemsTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="scanner" class="panel" style="display: none;">
+          <div class="panel-header scanner-header">
+            <h2>Check-in vé trực tiếp</h2>
+          </div>
+
+          <div class="scanner-layout">
+            <div class="camera-box">
+              <video id="qr-video" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px; background: #000;"></video>
+              <div class="scan-overlay"></div>
+            </div>
+
+            <div class="result-box">
+              <h3>Kết quả quét</h3>
+              <div id="scanResult" class="scan-result neutral">
+                Chưa có dữ liệu quét.
+              </div>
+              <button id="startScannerBtn" class="btn btn-primary">Mở camera quét QR</button>
+              <button id="stopScannerBtn" class="btn btn-outline secondary">Dừng camera</button>
+              <form id="manualCheckinForm" class="manual-checkin-form">
+                <label for="manualQrCode">Nhập mã QR thủ công</label>
+                <input id="manualQrCode" name="manualQrCode" type="text" placeholder="THUY_MONG|..." autocomplete="off" />
+                <button type="submit" class="btn btn-outline secondary">Xác nhận check-in</button>
+              </form>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Modal xem anh bien lai -->
+    <div id="imageModal" class="image-modal" style="display: none;">
+      <div class="image-modal-backdrop" id="imageModalBackdrop"></div>
+      <div class="image-modal-content">
+        <button type="button" id="closeImageModal" class="image-modal-close" title="Đóng">&times;</button>
+        <img id="modalImage" src="" alt="Biên lai thanh toán" />
+      </div>
+    </div>
+
+    <!-- Modal thêm mặt hàng -->
+    <div class="modal-backdrop" id="itemModalBackdrop" style="display: none;"></div>
+    <div class="modal" id="itemModal" style="display: none; max-width: 500px; padding: 24px; border-radius: 12px; z-index: 10001; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
+      <h2 style="margin-top: 0; font-size: 18px; margin-bottom: 16px;">Thêm/Sửa mặt hàng</h2>
+      <form id="itemForm" style="display: flex; flex-direction: column; gap: 12px;">
+        <input type="text" id="itemName" placeholder="Tên mặt hàng (VD: Tứ Linh)" required style="padding: 10px; border: 1px solid #ddd; border-radius: 6px;" />
+        <input type="text" id="itemId" placeholder="Mã ID (VD: tu-linh, viết liền không dấu)" required style="padding: 10px; border: 1px solid #ddd; border-radius: 6px;" />
+        <select id="itemType" required style="padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+          <option value="ticket">Vé (Ticket)</option>
+          <option value="merch">Ấn phẩm (Merch)</option>
+        </select>
+        <input type="number" id="itemPrice" placeholder="Giá (VD: 300000)" required style="padding: 10px; border: 1px solid #ddd; border-radius: 6px;" />
+        <input type="number" id="itemQuantity" placeholder="Số lượng tồn kho (bỏ trống nếu vô hạn)" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px;" />
+        <textarea id="itemBenefit" placeholder="Quyền lợi / Mô tả..." rows="3" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <label style="font-size: 13px; font-weight: 600;">Ảnh mặt hàng:</label>
+          <input type="file" id="itemImage" accept="image/*" />
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">
+          <button type="button" class="btn btn-outline" id="closeItemModalBtn" style="padding: 8px 16px; border-radius: 6px;">Hủy</button>
+          <button type="submit" class="btn btn-primary" style="padding: 8px 16px; border-radius: 6px;">Lưu mặt hàng</button>
+        </div>
+      </form>
+    </div>
+    <!-- End modal -->
+
+    <script src="https://unpkg.com/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
+    <script src="/qltm.js"></script>
+  </body>
+</html>
