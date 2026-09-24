@@ -1238,6 +1238,47 @@ app.delete('/api/admin/items/:id', (req, res) => {
   if (saveItems(next)) return res.json({ success: true, message: 'Đã xóa mặt hàng.' });
   return res.status(500).json({ error: 'Lỗi khi lưu dữ liệu.' });
 });
+////TEST SEPAY CONNECTION
+
+app.get('/api/test-sepay-connection', async (req, res) => {
+  const { paymentUrl, apiKey, webhookApiKey } = config.sepay;
+  const results = {
+    webhookConfigured: Boolean(webhookApiKey && webhookApiKey !== 'dev-sepay-key'),
+    paymentApiConfigured: Boolean(paymentUrl && apiKey),
+    sepayReachable: false,
+    details: {}
+  };
+
+  console.log('[SePay Check] Checking SePay configuration and connectivity...');
+  console.log(`[SePay Check] Webhook Key configured: ${results.webhookConfigured}`);
+  console.log(`[SePay Check] Payment API configured: ${results.paymentApiConfigured}`);
+
+  if (paymentUrl) {
+    try {
+      // Test gửi request ping/options/health tới Payment API của SePay
+      const resPing = await fetchWithTimeout(paymentUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({ test: true })
+      }, 5000);
+
+      results.sepayReachable = true;
+      results.details = {
+        httpStatus: resPing.status,
+        statusText: resPing.statusText
+      };
+      console.log(`[SePay Check] Reached SePay API successfully. Status: ${resPing.status}`);
+    } catch (err) {
+      results.details = { error: err.message };
+      console.error('[SePay Check] Failed to reach SePay Payment URL:', err.message);
+    }
+  }
+
+  return res.json(results);
+});
 
 /* ================================================================== */
 /* 9. TRANG TĨNH                                                       */
