@@ -788,6 +788,15 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
 });
 
 
+// Health check + aliases để SePay test connection không bị 404
+app.get('/api/sepay-webhook', (req, res) => {
+  return res.status(200).json({ success: true, message: 'SePay webhook endpoint is active and listening for POST events.' });
+});
+
+app.get('/api/public/sepay-webhook', (req, res) => {
+  return res.redirect(307, '/api/sepay-webhook');
+});
+
 // XỬ LÝ WEBHOOK SEPAY TỰ ĐỘNG
 app.post('/api/sepay-webhook', async (req, res) => {
   const payload = req.body || {};
@@ -926,6 +935,10 @@ app.post('/api/sepay-webhook', async (req, res) => {
       qrCodeUrl: order.qrCodeUrl
     }
   });
+});
+
+app.post('/api/public/sepay-webhook', (req, res) => {
+  return res.redirect(307, '/api/sepay-webhook');
 });
 
 app.get('/api/admin/orders', async (req, res) => {
