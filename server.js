@@ -924,10 +924,8 @@ app.all(webhookPaths, async (req, res) => {
             total: order.total
           })
         }, 7000);
-        const resText = await sheetRes.text();
-        console.log(`[SHEET WEBHOOK] Phản hồi từ Google Sheet (Status: ${sheetRes.status}):`, resText);
       } catch (sheetErr) {
-        console.error('[SHEET WEBHOOK ERROR] Lỗi khi gọi Google Sheet:', sheetErr.message);
+        console.warn('Lỗi gửi dữ liệu xác nhận thanh toán về Sheet:', sheetErr.message);
       }
 
     }
@@ -973,26 +971,29 @@ app.post('/api/admin/checkin', async (req, res) => {
     });
   }
 
-  // Cập nhật trạng thái
-  order.ticketStatus = 'Đã sử dụng';
-  order.checkedInAt = new Date().toISOString();
-  await saveOrderPersistent(order);
-
   // Đồng bộ trạng thái check-in sang Google Sheet
   const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
   if (sheetWebhookUrl) {
     try {
-      fetchWithTimeout(sheetWebhookUrl, {
+      console.log('[CHECKIN] Đang gửi dữ liệu check-in sang Google Sheet...');
+      const sheetRes = await fetchWithTimeout(sheetWebhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'CHECKIN',
           orderCode: order.orderCode,
           checkedInAt: order.checkedInAt,
-          ticketStatus: 'Đã sử dụng'
+          ticketStatus: 'Đã sử dụng',
+          customerName: order.customer?.name || '',
+          items: order.itemsStr || (order.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', ')
         })
-      }, 5000).catch(e => console.warn('Lỗi sync checkin sheet:', e.message));
-    } catch (_) { }
+      }, 7000);
+
+      const sheetText = await sheetRes.text();
+      console.log(`[CHECKIN] Google Sheet phản hồi (Status: ${sheetRes.status}):`, sheetText);
+    } catch (sheetErr) {
+      console.error('[CHECKIN ERROR] Lỗi đồng bộ check-in sang Google Sheet:', sheetErr.message);
+    }
   }
 
   return res.status(200).json({
@@ -1005,6 +1006,18 @@ app.post('/api/admin/checkin', async (req, res) => {
       checkedInAt: order.checkedInAt
     }
   });
+});
+
+return res.status(200).json({
+  message: 'Check-in vé thành công!',
+  order: {
+    orderCode: order.orderCode,
+    customerName: order.customer?.name,
+    itemsStr: order.itemsStr || (order.items || []).map(i => `${i.name} (x${i.quantity})`).join(', '),
+    ticketStatus: order.ticketStatus,
+    checkedInAt: order.checkedInAt
+  }
+});
 });
 // Middleware kiểm tra token hoặc basic session của Admin
 function requireAdminAuth(req, res, next) {
