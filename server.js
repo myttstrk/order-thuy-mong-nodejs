@@ -1018,7 +1018,7 @@ return res.status(200).json({
     checkedInAt: order.checkedInAt
   }
 });
-});
+
 // Middleware kiểm tra token hoặc basic session của Admin
 function requireAdminAuth(req, res, next) {
   const authHeader = req.headers['authorization'] || '';
