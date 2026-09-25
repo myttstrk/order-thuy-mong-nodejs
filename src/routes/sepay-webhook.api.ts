@@ -1,8 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { sendTicketEmail } from "@/lib/mailer.server";
 
-export const Route = createFileRoute("/api/sepay-webhook")({
-  server: {
+export const Route = createFileRoute("/sepay-webhook")({  server: {
     handlers: {
       GET: async () => {
         return Response.json({
