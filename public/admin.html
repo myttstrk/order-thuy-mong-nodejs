@@ -1,0 +1,69 @@
+<!-- Tích hợp trong public/admin.html -->
+<div class="checkin-container" style="max-width: 500px; margin: 20px auto; padding: 16px; text-align: center;">
+  <h2>Soát Vé Vào Cửa</h2>
+  
+  <div id="reader" style="width: 100%; border-radius: 12px; overflow: hidden;"></div>
+  
+  <!-- Khu vực hiển thị kết quả -->
+  <div id="checkin-result" style="margin-top: 20px; padding: 16px; border-radius: 8px; display: none;"></div>
+</div>
+
+<script src="https://unpkg.com/html5-qrcode"></script>
+<script>
+  let isScanning = true;
+
+  function onScanSuccess(decodedText, decodedResult) {
+    if (!isScanning) return;
+    isScanning = false; // Tạm dừng quét để xử lý
+
+    // Gọi API checkin của server
+    fetch('/api/admin/checkin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ qrCode: decodedText })
+    })
+    .then(res => res.json().then(data => ({ status: res.status, body: data })))
+    .then(({ status, body }) => {
+      const box = document.getElementById('checkin-result');
+      box.style.display = 'block';
+
+      if (status === 200) {
+        // Thành công: Hiển thị xanh
+        box.style.backgroundColor = '#d4edda';
+        box.style.color = '#155724';
+        box.innerHTML = `
+          <h3 style="margin: 0 0 8px;">✅ CHECK-IN HỢP LỆ</h3>
+          <p><strong>Khách:</strong> ${body.order.customerName}</p>
+          <p><strong>Vé/Mặt hàng:</strong> ${body.order.itemsStr}</p>
+          <p><strong>Mã:</strong> ${body.order.orderCode}</p>
+        `;
+        // Phát âm thanh bíp thông báo thành công (tùy chọn)
+      } else {
+        // Thất bại (đã check-in hoặc chưa thanh toán): Hiển thị đỏ
+        box.style.backgroundColor = '#f8d7da';
+        box.style.color = '#721c24';
+        box.innerHTML = `
+          <h3 style="margin: 0 0 8px;">❌ CẢNH BÁO: KHÔNG HỢP LỆ</h3>
+          <p>${body.message}</p>
+        `;
+      }
+
+      // Sau 3 giây cho phép quét tiếp lượt mới
+      setTimeout(() => {
+        isScanning = true;
+      }, 3000);
+    })
+    .catch(err => {
+      alert("Lỗi kết nối máy chủ: " + err.message);
+      isScanning = true;
+    });
+  }
+
+  // Khởi động Camera quét QR
+  const html5QrcodeScanner = new Html5QrcodeScanner(
+    "reader", 
+    { fps: 10, qrbox: { width: 250, height: 250 } },
+    /* verbose= */ false
+  );
+  html5QrcodeScanner.render(onScanSuccess);
+</script>

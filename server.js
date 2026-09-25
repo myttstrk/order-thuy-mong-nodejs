@@ -973,13 +973,37 @@ app.post('/api/admin/checkin', async (req, res) => {
     });
   }
 
+ // Cập nhật trạng thái
   order.ticketStatus = 'Đã sử dụng';
   order.checkedInAt = new Date().toISOString();
   await saveOrderPersistent(order);
 
+  // Đồng bộ trạng thái check-in sang Google Sheet
+  const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
+  if (sheetWebhookUrl) {
+    try {
+      fetchWithTimeout(sheetWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'CHECKIN',
+          orderCode: order.orderCode,
+          checkedInAt: order.checkedInAt,
+          ticketStatus: 'Đã sử dụng'
+        })
+      }, 5000).catch(e => console.warn('Lỗi sync checkin sheet:', e.message));
+    } catch (_) {}
+  }
+
   return res.status(200).json({
-    message: 'Check-in thành công!',
-    order
+    message: 'Check-in vé thành công!',
+    order: {
+      orderCode: order.orderCode,
+      customerName: order.customer?.name,
+      itemsStr: order.itemsStr || (order.items || []).map(i => `${i.name} (x${i.quantity})`).join(', '),
+      ticketStatus: order.ticketStatus,
+      checkedInAt: order.checkedInAt
+    }
   });
 });
 
