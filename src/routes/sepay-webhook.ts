@@ -45,13 +45,13 @@ export const Route = createFileRoute("/api/sepay-webhook")({
         }
 
         const amount = Number(transaction["transferAmount"] ?? transaction["amount"] ?? payload["amount"] ?? 0);
-        const content = [
+
+        // Chỉ lấy content và description (KHÔNG lấy referenceCode/id để tránh nhận nhầm mã tham chiếu ngân hàng)
+        const rawContent = [
           transaction["content"],
           transaction["description"],
-          transaction["code"],
           payload["content"],
-          payload["description"],
-          payload["code"],
+          payload["description"]
         ]
           .filter(Boolean)
           .join(" ");
@@ -60,33 +60,64 @@ export const Route = createFileRoute("/api/sepay-webhook")({
           transaction["referenceCode"] ?? transaction["id"] ?? payload["referenceCode"] ?? payload["id"] ?? ""
         );
 
-        // 3. Khớp mã đơn hàng (hỗ trợ MUA_VE_TM26XXXXXX hoặc TM-Timestamp-XXXXX)
+        // 3. Chuẩn hóa chuỗi nội dung: bỏ dấu gạch ngang, dấu cách để nhận diện mã đơn bị dính liền
+        const normalizedContent = rawContent.replace(/[\s\-_]/g, "").toUpperCase();
+
+        // Bóc tách mã: TM + Timestamp (10-15 số) + chuỗi ký tự (VNU70...) hoặc TM26...
         const match =
-          /MUA[_\s-]?VE[_\s-]?(TM26[A-Z0-9]{6})/i.exec(content) ||
-          /(TM-\d+-[A-Z0-9]+)/i.exec(content) ||
-          /(TM26[A-Z0-9]{6})/i.exec(content);
+          /(TM\d{10,15}[A-Z0-9]+)/i.exec(normalizedContent) ||
+          /MUA[_\s-]?VE[_\s-]?(TM26[A-Z0-9]{6})/i.exec(normalizedContent) ||
+          /(TM26[A-Z0-9]{6})/i.exec(normalizedContent);
 
         if (!match) {
           return Response.json({
             success: true,
-            message: "Không tìm thấy mã đơn hàng trong nội dung",
+            message: `Không tìm thấy mã đơn hàng hợp lệ trong nội dung: ${rawContent}`,
           });
         }
-        const orderCode = match[1]!.toUpperCase();
+
+        const extractedCode = match[1]!.toUpperCase();
 
         // 4. Truy vấn đơn hàng từ Supabase
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-        const { data: order, error: fetchError } = await supabaseAdmin
+        // Tìm kiếm chính xác hoặc tìm kiếm gần đúng với mã đơn
+        let order = null;
+
+        // Thử tìm theo mã chính xác
+        const { data: directOrder } = await supabaseAdmin
           .from("orders")
           .select("id, order_code, customer_name, customer_email, customer_phone, delivery_location, total_amount, status, checkin_token")
-          .eq("order_code", orderCode)
+          .eq("order_code", extractedCode)
           .maybeSingle();
 
-        if (fetchError || !order) {
-          return Response.json({ success: false, message: "Không tìm thấy đơn hàng" }, { status: 404 });
+        if (directOrder) {
+          order = directOrder;
+        } else {
+          // Nếu trong DB lưu mã có dấu gạch ngang (TM-179...-VNU70), truy vấn các đơn gần nhất để đối soát
+          const { data: recentOrders } = await supabaseAdmin
+            .from("orders")
+            .select("id, order_code, customer_name, customer_email, customer_phone, delivery_location, total_amount, status, checkin_token")
+            .order("created_at", { ascending: false })
+            .limit(50);
+
+          if (recentOrders && recentOrders.length > 0) {
+            order = recentOrders.find((entry) => {
+              if (!entry.order_code) return false;
+              const cleanDbCode = entry.order_code.replace(/[\s\-_]/g, "").toUpperCase();
+              return cleanDbCode === extractedCode || normalizedContent.includes(cleanDbCode);
+            }) || null;
+          }
         }
 
+        if (!order) {
+          return Response.json({
+            success: false,
+            message: `Không tìm thấy đơn hàng tương ứng với mã: ${extractedCode}`,
+          }, { status: 404 });
+        }
+
+        // Chống xử lý lặp lại nếu đơn đã thanh toán
         if (order.status === "paid" || order.status === "used" || order.status === "Đã thanh toán") {
           return Response.json({ success: true, message: "Đơn hàng đã được thanh toán trước đó" });
         }
@@ -102,17 +133,17 @@ export const Route = createFileRoute("/api/sepay-webhook")({
 
         const paidAt = new Date().toISOString();
 
-        // 6. Cập nhật trạng thái "paid"
+        // 6. Cập nhật trạng thái "paid" và "Đã thanh toán"
         await supabaseAdmin
           .from("orders")
           .update({
-            status: "paid",
+            status: "Đã thanh toán",
             paid_at: paidAt,
             bank_reference: reference,
           })
           .eq("id", order.id);
 
-        // 7. Lấy danh sách item
+        // 7. Lấy danh sách sản phẩm / vé
         const { data: items } = await supabaseAdmin
           .from("order_items")
           .select("item_name, unit_price, quantity")
@@ -143,7 +174,7 @@ export const Route = createFileRoute("/api/sepay-webhook")({
           console.error("Lỗi gửi ticket email:", emailErr);
         }
 
-        // 9. Đồng bộ sang Google Sheet nếu có Webhook URL
+        // 9. Đồng bộ sang Google Sheet (nếu có cấu hình)
         const sheetWebhookUrl = process.env["GOOGLE_SHEET_WEBHOOK_URL"];
         if (sheetWebhookUrl) {
           try {
@@ -170,7 +201,7 @@ export const Route = createFileRoute("/api/sepay-webhook")({
 
         return Response.json({
           success: true,
-          orderCode,
+          orderCode: order.order_code,
           emailSent: sent,
         });
       },
