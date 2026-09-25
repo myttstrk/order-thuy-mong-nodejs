@@ -1,14 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { sendTicketEmail } from "@/lib/mailer.server";
 
-/**
- * Webhook nhận biến động số dư từ SePay.
- * Cấu hình URL trong SePay: <domain>/api/public/sepay-webhook
- */
-export const Route = createFileRoute("/api/public/sepay-webhook")({
-  // `server.handlers` is supported by the TanStack Start server route API, but not by the
-  // client-side route typings in the currently installed package version. Cast the config so
-  // the route remains usable without breaking the TypeScript checker.
+export const Route = createFileRoute("/api/sepay-webhook")({
   server: {
     handlers: {
       GET: async () => {
@@ -19,7 +12,7 @@ export const Route = createFileRoute("/api/public/sepay-webhook")({
       },
 
       POST: async ({ request }) => {
-        // 1. Kiểm tra xác thực API Key từ SePay
+        // 1. Kiểm tra API Key từ SePay
         const expectedKey = process.env["SEPAY_WEBHOOK_API_KEY"] || process.env["SEPAY_API_KEY"];
         const authHeader = request.headers.get("authorization") ?? "";
         const providedKey = authHeader.replace(/^Apikey\s+/i, "").replace(/^Bearer\s+/i, "").trim();
@@ -31,18 +24,16 @@ export const Route = createFileRoute("/api/public/sepay-webhook")({
           return Response.json({ success: false, message: "Body không hợp lệ" }, { status: 400 });
         }
 
-        // Kiểm tra API Key (bỏ qua nếu là sự kiện test do SePay gửi)
+        // Bỏ qua kiểm tra key nếu là request test kết nối từ SePay
         const isTestRequest = Boolean(payload["test"] || (payload["data"] as Record<string, unknown>)?.["test"]);
         if (expectedKey && !isTestRequest && providedKey !== expectedKey) {
           return Response.json({ success: false, message: "Sai API key" }, { status: 401 });
         }
 
-        // SePay có thể bọc transaction trong payload.data hoặc đặt trực tiếp ở root
         const transaction = (payload["data"] && typeof payload["data"] === "object"
           ? payload["data"]
           : payload) as Record<string, unknown>;
 
-        // Phản hồi thành công ngay nếu là request test kết nối từ SePay
         if (isTestRequest) {
           return Response.json({ success: true, message: "Webhook test connection verified." });
         }
@@ -69,8 +60,7 @@ export const Route = createFileRoute("/api/public/sepay-webhook")({
           transaction["referenceCode"] ?? transaction["id"] ?? payload["referenceCode"] ?? payload["id"] ?? ""
         );
 
-        // 3. Bóc tách mã đơn hàng:
-        // Khớp pattern MUA_VE_TM26XXXXXX hoặc TM-Timestamp-XXXXX
+        // 3. Khớp mã đơn hàng (hỗ trợ MUA_VE_TM26XXXXXX hoặc TM-Timestamp-XXXXX)
         const match =
           /MUA[_\s-]?VE[_\s-]?(TM26[A-Z0-9]{6})/i.exec(content) ||
           /(TM-\d+-[A-Z0-9]+)/i.exec(content) ||
@@ -79,10 +69,9 @@ export const Route = createFileRoute("/api/public/sepay-webhook")({
         if (!match) {
           return Response.json({
             success: true,
-            message: "Không tìm thấy mã đơn hàng trong nội dung giao dịch",
+            message: "Không tìm thấy mã đơn hàng trong nội dung",
           });
         }
-
         const orderCode = match[1]!.toUpperCase();
 
         // 4. Truy vấn đơn hàng từ Supabase
@@ -98,7 +87,6 @@ export const Route = createFileRoute("/api/public/sepay-webhook")({
           return Response.json({ success: false, message: "Không tìm thấy đơn hàng" }, { status: 404 });
         }
 
-        // Chống lặp nếu đã thanh toán
         if (order.status === "paid" || order.status === "used" || order.status === "Đã thanh toán") {
           return Response.json({ success: true, message: "Đơn hàng đã được thanh toán trước đó" });
         }
@@ -114,7 +102,7 @@ export const Route = createFileRoute("/api/public/sepay-webhook")({
 
         const paidAt = new Date().toISOString();
 
-        // 6. Cập nhật trạng thái sang "paid"
+        // 6. Cập nhật trạng thái "paid"
         await supabaseAdmin
           .from("orders")
           .update({
@@ -124,7 +112,7 @@ export const Route = createFileRoute("/api/public/sepay-webhook")({
           })
           .eq("id", order.id);
 
-        // 7. Lấy danh sách item để gửi mail và đồng bộ Sheet
+        // 7. Lấy danh sách item
         const { data: items } = await supabaseAdmin
           .from("order_items")
           .select("item_name, unit_price, quantity")
@@ -155,7 +143,7 @@ export const Route = createFileRoute("/api/public/sepay-webhook")({
           console.error("Lỗi gửi ticket email:", emailErr);
         }
 
-        // 9. Đồng bộ sang Google Sheet (nếu có cấu hình webhook Apps Script)
+        // 9. Đồng bộ sang Google Sheet nếu có Webhook URL
         const sheetWebhookUrl = process.env["GOOGLE_SHEET_WEBHOOK_URL"];
         if (sheetWebhookUrl) {
           try {
