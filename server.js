@@ -937,10 +937,130 @@ app.post('/api/sepay-webhook', async (req, res) => {
   });
 });
 
-app.post('/api/public/sepay-webhook', (req, res) => {
-  return res.redirect(307, '/api/sepay-webhook');
+// Cho phép SePay test hoặc ping qua GET
+app.get('/api/sepay-webhook', (req, res) => {
+  return res.status(200).json({
+    status: true,
+    message: 'SePay webhook endpoint is active.'
+  });
 });
 
+// Nhận webhook từ SePay qua POST
+app.post('/api/sepay-webhook', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const transaction = (payload.data && typeof payload.data === 'object' ? payload.data : payload) || {};
+
+    // 1. Phản hồi thành công ngay nếu là SePay bấm nút Test
+    if (payload.test === true || transaction.test === true) {
+      return res.status(200).json({
+        success: true,
+        message: 'Webhook test connection verified.'
+      });
+    }
+
+    // 2. Chỉ xử lý tiền vào (in)
+    const transferType = String(transaction.transferType || payload.transferType || 'in').toLowerCase();
+    if (transferType !== 'in') {
+      return res.status(200).json({ success: true, message: 'Bỏ qua giao dịch ra' });
+    }
+
+    // 3. Lấy nội dung chuyển khoản & chuẩn hóa bỏ dấu cách, dấu gạch ngang
+    const rawContent = [
+      transaction.content,
+      transaction.description,
+      payload.content,
+      payload.description
+    ].filter(Boolean).join(' ');
+
+    const normalizedContent = rawContent.replace(/[\s\-_]/g, '').toUpperCase();
+
+    // Bắt mã TM (VD: TM1790360200792VNU70 hoặc TM-1790360200792-VNU70)
+    const match = /(TM\d{10,15}[A-Z0-9]+)/i.exec(normalizedContent) || /(TM26[A-Z0-9]{6})/i.exec(normalizedContent);
+
+    if (!match) {
+      return res.status(200).json({
+        success: true,
+        message: `Bỏ qua: Không tìm thấy mã đơn hàng trong nội dung "${rawContent}"`
+      });
+    }
+
+    const extractedCode = match[1].toUpperCase();
+    const amount = Number(transaction.transferAmount || transaction.amount || payload.amount || 0);
+
+    // 4. Tìm và cập nhật đơn hàng trong Supabase
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (supabaseUrl && supabaseKey) {
+      try {
+        const queryRes = await fetch(`${supabaseUrl}/rest/v1/orders?select=*&order=created_at.desc&limit=50`, {
+          headers: {
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`
+          }
+        });
+
+        if (queryRes.ok) {
+          const orders = await queryRes.json();
+          const matchedOrder = orders.find((entry) => {
+            const dbCode = (entry.order_code || entry.orderCode || '').replace(/[\s\-_]/g, '').toUpperCase();
+            return dbCode === extractedCode || normalizedContent.includes(dbCode);
+          });
+
+          if (matchedOrder) {
+            const targetCode = matchedOrder.order_code || matchedOrder.orderCode;
+            await fetch(`${supabaseUrl}/rest/v1/orders?order_code=eq.${encodeURIComponent(targetCode)}`, {
+              method: 'PATCH',
+              headers: {
+                apikey: supabaseKey,
+                Authorization: `Bearer ${supabaseKey}`,
+                'Content-Type': 'application/json',
+                Prefer: 'return=minimal'
+              },
+              body: JSON.stringify({
+                status: 'Đã thanh toán',
+                paid_at: new Date().toISOString()
+              })
+            });
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Lỗi Supabase:', dbErr.message);
+      }
+    }
+
+    // 5. Đồng bộ sang Google Sheet
+    const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
+    if (sheetWebhookUrl) {
+      try {
+        await fetch(sheetWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'CONFIRM_PAID',
+            orderCode: extractedCode,
+            status: 'Đã thanh toán',
+            total: amount,
+            paidAt: new Date().toISOString()
+          })
+        });
+      } catch (sheetErr) {
+        console.warn('Lỗi Sheet:', sheetErr.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Xác nhận thanh toán thành công!',
+      orderCode: extractedCode
+    });
+
+  } catch (error) {
+    console.error('Lỗi webhook:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
 app.get('/api/admin/orders', async (req, res) => {
   const { status, search } = req.query;
   let allOrders = await readOrdersPersistent(5000);
