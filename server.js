@@ -1055,11 +1055,11 @@ app.post('/api/admin/items', async (req, res) => {
   }
 });
 
-app.get('/admin', (req, res) => {
+app.get(['/admin', '/api/admin'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
-app.get('/contact', (req, res) => {
+app.get(['/contact', '/api/contact'], (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'contact.html'));
 });
 
