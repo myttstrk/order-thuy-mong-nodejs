@@ -973,7 +973,7 @@ app.post('/api/admin/checkin', async (req, res) => {
     });
   }
 
- // Cập nhật trạng thái
+  // Cập nhật trạng thái
   order.ticketStatus = 'Đã sử dụng';
   order.checkedInAt = new Date().toISOString();
   await saveOrderPersistent(order);
@@ -992,7 +992,7 @@ app.post('/api/admin/checkin', async (req, res) => {
           ticketStatus: 'Đã sử dụng'
         })
       }, 5000).catch(e => console.warn('Lỗi sync checkin sheet:', e.message));
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return res.status(200).json({
@@ -1006,7 +1006,32 @@ app.post('/api/admin/checkin', async (req, res) => {
     }
   });
 });
+// Middleware kiểm tra token hoặc basic session của Admin
+function requireAdminAuth(req, res, next) {
+  const authHeader = req.headers['authorization'] || '';
+  const expectedToken = Buffer.from(
+    `${process.env.ADMIN_USERNAME || 'admin'}:${process.env.ADMIN_PASSWORD || 'admin123'}`
+  ).toString('base64');
 
+  if (authHeader === `Basic ${expectedToken}` || req.headers['x-admin-token'] === expectedToken) {
+    return next();
+  }
+  return res.status(401).json({ message: 'Bạn chưa đăng nhập hoặc phiên làm việc đã hết hạn.' });
+}
+
+// API đăng nhập admin
+app.post('/api/admin/login', (req, res) => {
+  const { username, password } = req.body || {};
+  const expectedUser = process.env.ADMIN_USERNAME || 'admin';
+  const expectedPass = process.env.ADMIN_PASSWORD || 'admin123';
+
+  if (username === expectedUser && password === expectedPass) {
+    const token = Buffer.from(`${expectedUser}:${expectedPass}`).toString('base64');
+    return res.json({ success: true, token });
+  }
+
+  return res.status(401).json({ success: false, message: 'Sai tên đăng nhập hoặc mật khẩu.' });
+});
 // Quản lý mặt hàng
 app.get('/api/admin/items', async (req, res) => {
   const items = readItems();
@@ -1022,7 +1047,26 @@ app.get('/api/admin/items', async (req, res) => {
 
   res.json(updatedItems);
 });
+app.get('/api/admin/checkin-history', requireAdminAuth, async (req, res) => {
+  try {
+    const allOrders = await readOrdersPersistent(5000);
+    const scannedOrders = allOrders
+      .filter((o) => o.ticketStatus === 'Đã sử dụng' && o.checkedInAt)
+      .sort((a, b) => new Date(b.checkedInAt) - new Date(a.checkedInAt))
+      .map((o) => ({
+        orderCode: o.orderCode,
+        customerName: o.customer?.name || 'Khách',
+        customerPhone: o.customer?.phone || '',
+        itemsStr: o.itemsStr || (o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', '),
+        total: o.total,
+        checkedInAt: o.checkedInAt
+      }));
 
+    return res.json({ success: true, count: scannedOrders.length, data: scannedOrders });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 app.post('/api/admin/items', async (req, res) => {
   const newItem = req.body;
   if (!newItem || !newItem.id || !newItem.name) {

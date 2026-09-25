@@ -1,69 +1,196 @@
-<!-- Tích hợp trong public/admin.html -->
-<div class="checkin-container" style="max-width: 500px; margin: 20px auto; padding: 16px; text-align: center;">
-  <h2>Soát Vé Vào Cửa</h2>
-  
-  <div id="reader" style="width: 100%; border-radius: 12px; overflow: hidden;"></div>
-  
-  <!-- Khu vực hiển thị kết quả -->
-  <div id="checkin-result" style="margin-top: 20px; padding: 16px; border-radius: 8px; display: none;"></div>
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Soát Vé & Lịch Sử Check-in</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #333; }
+    .container { max-width: 900px; margin: 0 auto; }
+    .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); margin-bottom: 24px; }
+    .hidden { display: none !important; }
+    
+    /* Login Form */
+    .login-box { max-width: 360px; margin: 80px auto; padding: 30px; text-align: center; }
+    .login-box input { width: 100%; padding: 12px; margin: 8px 0 16px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+    .btn { background: #071a1d; color: #f1c66b; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; }
+    
+    /* Checkin Scan */
+    #reader { width: 100%; max-width: 450px; margin: 0 auto; border-radius: 10px; overflow: hidden; }
+    #scan-result { margin-top: 15px; padding: 12px; border-radius: 8px; display: none; font-size: 15px; }
+    .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #fafafa; color: #666; font-weight: 600; }
+    .badge { background: #e8f5e9; color: #2e7d32; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- MÀN HÌNH ĐĂNG NHẬP -->
+  <div id="login-section" class="card login-box">
+    <h2 style="margin-top:0;">Quản Trị Sự Kiện</h2>
+    <input type="text" id="username" placeholder="Tên đăng nhập" autocomplete="username">
+    <input type="password" id="password" placeholder="Mật khẩu" autocomplete="current-password">
+    <button class="btn" onclick="handleLogin()">Đăng nhập</button>
+    <p id="login-error" style="color: red; font-size: 13px; margin-top: 10px; display: none;"></p>
+  </div>
+
+  <!-- MÀN HÌNH CHÍNH (SAU KHI ĐĂNG NHẬP) -->
+  <div id="admin-dashboard" class="hidden">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <h2 style="margin: 0;">Soát Vé Vào Cửa</h2>
+      <button onclick="handleLogout()" style="background: none; border: 1px solid #ccc; padding: 6px 12px; border-radius: 6px; cursor: pointer;">Đăng xuất</button>
+    </div>
+
+    <!-- KHU VỰC CAMERA SCAN -->
+    <div class="card" style="text-align: center;">
+      <div id="reader"></div>
+      <div id="scan-result"></div>
+    </div>
+
+    <!-- KHU VỰC LỊCH SỬ QUÉT VÉ -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="margin: 0;">Lịch Sử Đã Scan (<span id="scan-count">0</span>)</h3>
+        <button onclick="loadHistory()" style="background: #eee; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer;">Làm mới</button>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Thời gian quét</th>
+              <th>Mã đơn</th>
+              <th>Khách hàng</th>
+              <th>Vé / Mặt hàng</th>
+              <th>Trạng thái</th>
+            </tr>
+          </thead>
+          <tbody id="history-body">
+            <tr><td colspan="5" style="text-align: center; color: #999;">Chưa có lượt quét nào</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 
-<script src="https://unpkg.com/html5-qrcode"></script>
 <script>
+  let scanner = null;
   let isScanning = true;
 
-  function onScanSuccess(decodedText, decodedResult) {
-    if (!isScanning) return;
-    isScanning = false; // Tạm dừng quét để xử lý
-
-    // Gọi API checkin của server
-    fetch('/api/admin/checkin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ qrCode: decodedText })
-    })
-    .then(res => res.json().then(data => ({ status: res.status, body: data })))
-    .then(({ status, body }) => {
-      const box = document.getElementById('checkin-result');
-      box.style.display = 'block';
-
-      if (status === 200) {
-        // Thành công: Hiển thị xanh
-        box.style.backgroundColor = '#d4edda';
-        box.style.color = '#155724';
-        box.innerHTML = `
-          <h3 style="margin: 0 0 8px;">✅ CHECK-IN HỢP LỆ</h3>
-          <p><strong>Khách:</strong> ${body.order.customerName}</p>
-          <p><strong>Vé/Mặt hàng:</strong> ${body.order.itemsStr}</p>
-          <p><strong>Mã:</strong> ${body.order.orderCode}</p>
-        `;
-        // Phát âm thanh bíp thông báo thành công (tùy chọn)
-      } else {
-        // Thất bại (đã check-in hoặc chưa thanh toán): Hiển thị đỏ
-        box.style.backgroundColor = '#f8d7da';
-        box.style.color = '#721c24';
-        box.innerHTML = `
-          <h3 style="margin: 0 0 8px;">❌ CẢNH BÁO: KHÔNG HỢP LỆ</h3>
-          <p>${body.message}</p>
-        `;
-      }
-
-      // Sau 3 giây cho phép quét tiếp lượt mới
-      setTimeout(() => {
-        isScanning = true;
-      }, 3000);
-    })
-    .catch(err => {
-      alert("Lỗi kết nối máy chủ: " + err.message);
-      isScanning = true;
-    });
+  function getAuthHeader() {
+    const token = localStorage.getItem('tm_admin_token');
+    return token ? { 'x-admin-token': token } : {};
   }
 
-  // Khởi động Camera quét QR
-  const html5QrcodeScanner = new Html5QrcodeScanner(
-    "reader", 
-    { fps: 10, qrbox: { width: 250, height: 250 } },
-    /* verbose= */ false
-  );
-  html5QrcodeScanner.render(onScanSuccess);
+  async function handleLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const errEl = document.getElementById('login-error');
+
+    const res = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+
+    const data = await res.json();
+    if (res.ok && data.token) {
+      localStorage.setItem('tm_admin_token', data.token);
+      initDashboard();
+    } else {
+      errEl.innerText = data.message || 'Đăng nhập thất bại';
+      errEl.style.display = 'block';
+    }
+  }
+
+  function handleLogout() {
+    localStorage.removeItem('tm_admin_token');
+    if (scanner) scanner.clear();
+    location.reload();
+  }
+
+  function initDashboard() {
+    document.getElementById('login-section').classList.add('hidden');
+    document.getElementById('admin-dashboard').classList.remove('hidden');
+
+    startScanner();
+    loadHistory();
+  }
+
+  function startScanner() {
+    scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
+    scanner.render(onScanSuccess);
+  }
+
+  async function onScanSuccess(decodedText) {
+    if (!isScanning) return;
+    isScanning = false;
+
+    const resBox = document.getElementById('scan-result');
+    resBox.style.display = 'block';
+
+    try {
+      const res = await fetch('/api/admin/checkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ qrCode: decodedText })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        resBox.className = 'success';
+        resBox.innerHTML = `<strong>✅ HỢP LỆ:</strong> ${data.order.customerName} - ${data.order.itemsStr}`;
+        loadHistory(); // Nạp lại bảng lịch sử ngay
+      } else {
+        resBox.className = 'error';
+        resBox.innerHTML = `<strong>❌ KHÔNG HỢP LỆ:</strong> ${data.message}`;
+      }
+    } catch (e) {
+      resBox.className = 'error';
+      resBox.innerText = 'Lỗi kết nối: ' + e.message;
+    }
+
+    setTimeout(() => { isScanning = true; }, 2500);
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await fetch('/api/admin/checkin-history', { headers: getAuthHeader() });
+      if (res.status === 401) return handleLogout();
+
+      const { data, count } = await res.json();
+      document.getElementById('scan-count').innerText = count || 0;
+      const tbody = document.getElementById('history-body');
+
+      if (!data || data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #999;">Chưa có lượt quét nào</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = data.map(o => `
+        <tr>
+          <td>${new Date(o.checkedInAt).toLocaleTimeString('vi-VN')} (${new Date(o.checkedInAt).toLocaleDateString('vi-VN')})</td>
+          <td><strong>${o.orderCode}</strong></td>
+          <td>${o.customerName} <br><small style="color: #666;">${o.customerPhone}</small></td>
+          <td>${o.itemsStr}</td>
+          <td><span class="badge">Đã check-in</span></td>
+        </tr>
+      `).join('');
+    } catch (_) {}
+  }
+
+  // Tự động vào thẳng dashboard nếu đã có token đăng nhập từ trước
+  if (localStorage.getItem('tm_admin_token')) {
+    initDashboard();
+  }
 </script>
+</body>
+</html>
