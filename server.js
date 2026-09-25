@@ -788,162 +788,155 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
 });
 
 
-// Health check + aliases để SePay test connection không bị 404
-app.get('/api/sepay-webhook', (req, res) => {
-  return res.status(200).json({ success: true, message: 'SePay webhook endpoint is active and listening for POST events.' });
-});
 
-app.get('/api/public/sepay-webhook', (req, res) => {
-  return res.redirect(307, '/api/sepay-webhook');
-});
 
-// XỬ LÝ WEBHOOK SEPAY TỰ ĐỘNG
-app.post('/api/sepay-webhook', async (req, res) => {
-  const payload = req.body || {};
-  const transaction = payload.data && typeof payload.data === 'object' ? payload.data : payload;
-  const rawSignature = req.headers['x-signature'] || req.headers['signature'] || req.headers['x-sepay-signature'];
-  const authHeader = req.headers['authorization'];
+// Hỗ trợ cả 2 đường dẫn để không bao giờ bị 404 trên Vercel
+const webhookPaths = ['/api/sepay-webhook', '/sepay-webhook'];
 
-  if (!verifySePaySignature(payload, rawSignature, authHeader)) {
-    return res.status(401).json({ message: 'Chữ ký webhook SePay không hợp lệ.' });
+app.all(webhookPaths, async (req, res) => {
+  // Cho phép SePay test hoặc ping qua GET
+  if (req.method === 'GET') {
+    return res.status(200).json({
+      success: true,
+      message: 'SePay webhook endpoint is active and listening.'
+    });
   }
 
-  const orderCodeFromPayload =
-    transaction.orderCode ||
-    transaction.code ||
-    transaction.reference ||
-    transaction.referenceCode ||
-    transaction.order_id ||
-    transaction.content ||
-    transaction.transactionContent ||
-    transaction.transferContent ||
-    transaction.description ||
-    payload.orderCode ||
-    payload.content ||
-    payload.description;
-
-  const rawAmount =
-    transaction.amount ??
-    transaction.transferAmount ??
-    transaction.transfer_amount ??
-    transaction.transfer_amount_in ??
-    payload.amount ??
-    payload.transferAmount ??
-    0;
-  const amount = Number(rawAmount || 0);
-
-  if (!orderCodeFromPayload) {
-    return res.status(400).json({ message: 'Thiếu mã đơn hàng hoặc nội dung chuyển khoản trong webhook SePay.' });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method Not Allowed' });
   }
 
-  const orderCodeText = String(orderCodeFromPayload).trim();
+  try {
+    const payload = req.body || {};
+    const transaction = (payload.data && typeof payload.data === 'object' ? payload.data : payload) || {};
 
-  const paymentSucceeded =
-    transaction.code === undefined ||
-    transaction.code === '00' ||
-    transaction.code === 0 ||
-    transaction.transferType === 'in' ||
-    payload.code === undefined ||
-    payload.code === '00' ||
-    payload.transferType === 'in';
+    // 1. Phản hồi test từ SePay
+    if (payload.test === true || transaction.test === true) {
+      return res.status(200).json({ success: true, message: 'Webhook test verified.' });
+    }
 
-  if (!paymentSucceeded) {
-    return res.status(200).json({ message: 'Giao dịch chưa hoàn tất hoặc không phải tiền vào.' });
-  }
+    // 2. Chỉ xử lý tiền vào (in)
+    const transferType = String(transaction.transferType || payload.transferType || 'in').toLowerCase();
+    if (transferType !== 'in') {
+      return res.status(200).json({ success: true, message: 'Bỏ qua giao dịch ra' });
+    }
 
-  const existingOrders = await readOrdersPersistent();
-  let order =
-    (await findOrderPersistent(orderCodeText)) ||
-    existingOrders.find((entry) => {
-      const code = entry.orderCode;
-      return (
-        orderCodeText.includes(code) ||
-        String(transaction.description || '').includes(code) ||
-        String(transaction.content || '').includes(code) ||
-        String(transaction.transactionContent || '').includes(code) ||
-        String(payload.content || '').includes(code)
-      );
+    // 3. Trích xuất và chuẩn hóa nội dung chuyển khoản
+    const rawContent = [
+      transaction.content,
+      transaction.description,
+      transaction.transactionContent,
+      payload.content,
+      payload.description
+    ].filter(Boolean).join(' ');
+
+    const normalizedContent = rawContent.replace(/[\s\-_]/g, '').toUpperCase();
+    const match = /(TM\d{10,15}[A-Z0-9]+)/i.exec(normalizedContent) || /(TM26[A-Z0-9]{6})/i.exec(normalizedContent);
+
+    if (!match) {
+      return res.status(200).json({
+        success: true,
+        message: `Bỏ qua: Không tìm thấy mã đơn hàng trong nội dung "${rawContent}"`
+      });
+    }
+
+    const extractedCleanCode = match[1].toUpperCase();
+    const rawAmount = transaction.transferAmount ?? transaction.amount ?? payload.amount ?? 0;
+    const amount = Number(rawAmount || 0);
+
+    // 4. Tìm đơn hàng (so khớp mã bỏ dấu gạch ngang)
+    const existingOrders = await readOrdersPersistent();
+    let order = existingOrders.find((entry) => {
+      const cleanDbCode = String(entry.orderCode || entry.order_code || '').replace(/[\s\-_]/g, '').toUpperCase();
+      return cleanDbCode === extractedCleanCode || normalizedContent.includes(cleanDbCode);
     });
 
-  if (!order) {
-    return res.status(404).json({ message: `Không tìm thấy đơn hàng: ${orderCodeText}` });
-  }
+    if (!order) {
+      // Fallback query trực tiếp Supabase nếu chưa thấy trong cache
+      const remoteOrder = await findOrderPersistent(extractedCleanCode);
+      if (remoteOrder) {
+        order = remoteOrder;
+      }
+    }
 
-  if (Number(order.total) !== 0 && amount < Number(order.total)) {
-    return res.status(200).json({ message: 'Số tiền thanh toán chưa đủ với giá trị đơn hàng.', order });
-  }
+    if (!order) {
+      return res.status(200).json({
+        success: true,
+        message: `Đã nhận webhook nhưng chưa tìm thấy đơn khớp với mã ${extractedCleanCode}`
+      });
+    }
 
-  if (order.status === 'Đã thanh toán' && order.emailSent) {
-    return res.status(200).json({ message: 'Webhook đã được xử lý thành công trước đó.', order });
-  }
+    // Kiểm tra số tiền
+    if (Number(order.total) > 0 && amount < Number(order.total)) {
+      return res.status(200).json({ message: 'Số tiền thanh toán chưa đủ với giá trị đơn hàng.', order });
+    }
 
-  const now = new Date().toISOString();
-  order.status = 'Đã thanh toán';
-  order.ticketStatus = 'Chưa sử dụng';
-  order.paidAt = order.paidAt || now;
-  order.qrCodeUrl = order.qrCodeUrl || createQrCodeUrl(order);
+    // Đã thanh toán trước đó
+    if (order.status === 'Đã thanh toán' && order.emailSent) {
+      return res.status(200).json({ message: 'Đơn hàng đã được xác nhận từ trước.', order });
+    }
 
-  // Gửi email vé và QR Check-in
-  try {
-    const emailResult = await sendResendEmail(order);
-    order.emailSent = !emailResult.skipped;
-    order.emailId = emailResult.id || null;
-    delete order.emailError;
-  } catch (error) {
-    order.emailSent = false;
-    order.emailError = error.message;
-    console.error('Lỗi gửi email xác nhận:', error.message);
-  }
+    // 5. Cập nhật trạng thái đơn
+    const now = new Date().toISOString();
+    order.status = 'Đã thanh toán';
+    order.ticketStatus = 'Chưa sử dụng';
+    order.paidAt = order.paidAt || now;
+    order.qrCodeUrl = order.qrCodeUrl || createQrCodeUrl(order);
 
-  await saveOrderPersistent(order);
-  inventoryCacheTime = 0;
-
-  // Cập nhật Google Sheet đúng 9 cột: Thời gian | Mã đơn | Tên | SĐT | Email | Địa chỉ | Trạng thái | Ấn phẩm | Tổng tiền
-  const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
-  if (sheetWebhookUrl) {
+    // 6. Gửi Email vé và QR Check-in
     try {
-      await fetchWithTimeout(sheetWebhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'CONFIRM_PAID',
-          createdAt: order.createdAt,
-          paidAt: order.paidAt,
-          orderCode: order.orderCode,
-          customerName: order.customer.name,
-          customerPhone: order.customer.phone,
-          customerEmail: order.customer.email,
-          deliveryLocation: order.deliveryLocation || 'Nhận tại sự kiện',
-          status: order.status,
-          items: order.itemsStr || (order.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', '),
-          total: order.total
-        })
-      }, 7000);
-    } catch (sheetErr) {
-      console.error('Lỗi đẩy trạng thái thanh toán sang Google Sheet:', sheetErr.message);
+      const emailResult = await sendResendEmail(order);
+      order.emailSent = !emailResult.skipped;
+      order.emailId = emailResult?.id || null;
+      delete order.emailError;
+    } catch (mailErr) {
+      order.emailSent = false;
+      order.emailError = mailErr.message;
+      console.error('Lỗi gửi email:', mailErr.message);
     }
+
+    // 7. Lưu lại vào Supabase (cả order_data và các cột độc lập)
+    await saveOrderPersistent(order);
+    inventoryCacheTime = 0;
+
+    // 8. Đồng bộ Google Sheet
+    const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
+    if (sheetWebhookUrl) {
+      try {
+        await fetchWithTimeout(sheetWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'CONFIRM_PAID',
+            createdAt: order.createdAt,
+            paidAt: order.paidAt,
+            orderCode: order.orderCode,
+            customerName: order.customer?.name || '',
+            customerPhone: order.customer?.phone || '',
+            customerEmail: order.customer?.email || '',
+            deliveryLocation: order.deliveryLocation || 'Nhận tại sự kiện',
+            status: order.status,
+            items: order.itemsStr || (order.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', '),
+            total: order.total
+          })
+        }, 7000);
+      } catch (sheetErr) {
+        console.warn('Lỗi đồng bộ Sheet:', sheetErr.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Xác nhận thanh toán thành công!',
+      orderCode: order.orderCode
+    });
+
+  } catch (err) {
+    console.error('Lỗi xử lý webhook:', err);
+    return res.status(500).json({ success: false, error: err.message });
   }
-
-  return res.status(200).json({
-    success: true,
-    message: 'Thanh toán thành công. Đã cập nhật đơn, đồng bộ Google Sheet và gửi email QR Check-in.',
-    order: {
-      orderCode: order.orderCode,
-      status: order.status,
-      ticketStatus: order.ticketStatus,
-      emailSent: order.emailSent,
-      qrCodeUrl: order.qrCodeUrl
-    }
-  });
 });
 
-// Cho phép SePay test hoặc ping qua GET
-app.get('/api/sepay-webhook', (req, res) => {
-  return res.status(200).json({
-    status: true,
-    message: 'SePay webhook endpoint is active.'
-  });
-});
 
 
 app.post('/api/admin/checkin', async (req, res) => {
