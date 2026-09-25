@@ -576,7 +576,7 @@ app.get('/api/config', async (req, res) => {
       bankName: `${process.env.BANK_CODE || 'TPB'} Bank`,
       accountNumber: process.env.BANK_ACCOUNT_NUMBER || '20327264235',
       accountName: process.env.BANK_ACCOUNT_NAME || 'TRINH THANH MY',
-      webhookUrl: `${process.env.PUBLIC_BASE_URL || 'https://order-thuy-mong.vercel.app'}/api/sepay-webhook`
+      webhookUrl: `${process.env.PUBLIC_BASE_URL || 'https://thuy-mong-sk.vercel.app'}/api/sepay-webhook`
     }
   });
 });
