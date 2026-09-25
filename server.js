@@ -169,6 +169,32 @@ async function deleteOrderPersistent(orderCode) {
   }
 }
 
+/* Idempotency-Key: chặn tạo đơn trùng khi client retry do timeout/mất mạng.
+   Best-effort trong bộ nhớ (giống orderLimiter/locks) — trên Vercel serverless mỗi instance
+   có bộ nhớ riêng nên không chặn được 100% giữa các instance khác nhau, nhưng vẫn hữu ích
+   cho phần lớn trường hợp double-click / client tự động retry trên cùng 1 lambda ấm.
+   Lớp chống trùng "chắc" hơn (qua Supabase) là bước 7 (sameContactPending) bên dưới. */
+const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000; // 5 phút
+const IDEMPOTENCY_MAX_ENTRIES = 5000; // giới hạn bộ nhớ, tránh phình vô hạn
+const idempotencyCache = new Map(); // key -> { status, body, expiresAt }
+
+function getIdempotentResponse(key) {
+  if (!key) return null;
+  const entry = idempotencyCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    idempotencyCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+function setIdempotentResponse(key, status, body) {
+  if (!key) return;
+  if (idempotencyCache.size >= IDEMPOTENCY_MAX_ENTRIES) idempotencyCache.clear(); // an toàn bộ nhớ, hiếm khi chạm tới với quy mô 1 sự kiện
+  idempotencyCache.set(key, { status, body, expiresAt: Date.now() + IDEMPOTENCY_TTL_MS });
+}
+
 /* Khoá theo đơn hàng: chặn xử lý song song (webhook lặp, quét QR 2 lần cùng lúc) */
 const locks = new Map();
 async function withLock(key, fn) {
@@ -662,19 +688,28 @@ app.post('/api/orders', async (req, res) => {
     return fail(400, 'Thiếu thông tin khách hàng hoặc giỏ hàng.');
   }
 
-  // --- 2. Rate limit theo IP ---
+  // --- 2. Rate limit theo IP (rẻ nhất, chặn spam thô trước khi làm gì khác) ---
   const wait = orderLimiter.hit(req.ip || 'unknown');
   if (wait) {
     res.set('Retry-After', String(wait));
     return fail(429, 'Bạn đang tạo đơn hàng quá nhanh. Vui lòng chờ một lúc rồi thử lại.');
   }
 
-  // --- 3. Honeypot ---
+  // --- 3. Idempotency-Key: nếu đây là request lặp lại (double-click, client tự retry
+  // do timeout/mất mạng) trong vài phút gần đây, trả lại đúng kết quả cũ thay vì xử lý lại
+  // từ đầu (tránh tạo đơn trùng và tránh tốn captcha một lần dùng). ---
+  const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim().slice(0, 128) || null;
+  const cachedResponse = getIdempotentResponse(idempotencyKey);
+  if (cachedResponse) {
+    return res.status(cachedResponse.status).json(cachedResponse.body);
+  }
+
+  // --- 4. Honeypot ---
   if (typeof customer.website === 'string' && customer.website.trim() !== '') {
     return fail(400, 'Lỗi xác thực hệ thống.');
   }
 
-  // --- 4. Validate thông tin khách ---
+  // --- 5. Validate thông tin khách ---
   const name = String(customer.name || '').trim().replace(/\s+/g, ' ');
   const phone = String(customer.phone || '').replace(/\D/g, '');
   const email = String(customer.email || '').trim().toLowerCase();
@@ -699,7 +734,19 @@ app.post('/api/orders', async (req, res) => {
     }
   }
 
-  // --- 5. Kiểm tra MX của email (production) ---
+  // --- 6. Chặn sớm theo liên hệ (email/phone): lấy danh sách đơn 1 lần, dùng lại cho cả
+  // bước đếm nhanh ở đây lẫn bước so khớp giỏ hàng trùng ở bước 9 — tránh query Supabase 2 lần.
+  // Đặt trước bước MX/giỏ hàng (tốn hơn) để fail sớm nếu liên hệ này đã spam. ---
+  const recent = await readOrdersPersistent();
+  const sameContactPending = recent.filter((o) => isPendingActive(o) && (
+    String(o.customer?.phone || '').replace(/\D/g, '') === phone ||
+    String(o.customer?.email || '').trim().toLowerCase() === email
+  ));
+  if (sameContactPending.length >= config.antiSpam.maxPendingPerContact) {
+    return fail(429, `Bạn đang có ${sameContactPending.length} đơn chờ thanh toán. Vui lòng thanh toán hoặc chờ ${config.antiSpam.orderExpiryMinutes} phút để đơn cũ hết hạn.`);
+  }
+
+  // --- 7. Kiểm tra MX của email (production) ---
   if (config.isProd && !config.flags.allowTestOrders) {
     try {
       const mx = await dns.resolveMx(email.split('@')[1]);
@@ -709,7 +756,7 @@ app.post('/api/orders', async (req, res) => {
     }
   }
 
-  // --- 6. Giỏ hàng: giá & tên lấy từ server, kiểm tra tồn kho ---
+  // --- 8. Giỏ hàng: giá & tên lấy từ server, kiểm tra tồn kho ---
   const sold = await getInventory();
   const trusted = buildTrustedItems(cart.items, sold);
   if (trusted.error) return fail(400, trusted.error);
@@ -717,27 +764,22 @@ app.post('/api/orders', async (req, res) => {
   const total = calculateOrderTotal(items);
   if (total <= 0) return fail(400, 'Tổng tiền đơn hàng không hợp lệ.');
 
-  // --- 7. Chống đơn rác theo liên hệ: dedupe + giới hạn đơn chờ ---
-  const recent = await readOrdersPersistent();
-  const sameContactPending = recent.filter((o) => isPendingActive(o) && (
-    String(o.customer?.phone || '').replace(/\D/g, '') === phone ||
-    String(o.customer?.email || '').trim().toLowerCase() === email
-  ));
-
+  // --- 9. Đơn trùng: cùng liên hệ + cùng giỏ hàng đang chờ thanh toán → trả lại đơn cũ
+  // (đây là lớp "idempotency" ở mức nghiệp vụ, bền hơn vì đi qua Supabase, không phụ
+  // thuộc client có gửi Idempotency-Key hay không) ---
   const duplicate = sameContactPending.find((o) => cartSignature(o.items || []) === cartSignature(items));
   if (duplicate) {
-    return res.status(200).json({
+    const body = {
       message: 'Bạn đã có đơn giống hệt đang chờ thanh toán. Vui lòng hoàn tất thanh toán cho đơn này.',
       reused: true,
       order: duplicate,
       payment: createBankPayment(duplicate)
-    });
-  }
-  if (sameContactPending.length >= config.antiSpam.maxPendingPerContact) {
-    return fail(429, `Bạn đang có ${sameContactPending.length} đơn chờ thanh toán. Vui lòng thanh toán hoặc chờ ${config.antiSpam.orderExpiryMinutes} phút để đơn cũ hết hạn.`);
+    };
+    setIdempotentResponse(idempotencyKey, 200, body);
+    return res.status(200).json(body);
   }
 
-  // --- 8. Captcha (kiểm tra sau cùng để lỗi form không làm mất captcha) ---
+  // --- 10. Captcha (kiểm tra sau cùng để lỗi form không làm mất captcha) ---
   if (!config.flags.skipCaptcha) {
     if (!captcha || !captcha.token || !captcha.answer) return fail(400, 'Vui lòng xác thực mã bảo vệ.');
     if (!sec.checkCaptcha(captcha.token, captcha.answer)) {
@@ -746,13 +788,13 @@ app.post('/api/orders', async (req, res) => {
     if (!sec.consumeCaptcha(captcha.token)) return fail(400, 'Mã bảo vệ đã được sử dụng. Vui lòng tải mã mới.');
   }
 
-  // --- 9. Proof (tuỳ chọn) ---
+  // --- 11. Proof (tuỳ chọn) ---
   const proofImage = String(req.body?.proofImage || '').trim();
   if (proofImage && (!proofImage.startsWith('data:image/') || proofImage.length > config.antiSpam.maxProofChars)) {
     return fail(400, 'Ảnh biên lai không hợp lệ hoặc quá lớn.');
   }
 
-  // --- 10. Tạo đơn ---
+  // --- 12. Tạo đơn ---
   const now = new Date().toISOString();
   const method = String(paymentMethod || 'COD').toUpperCase();
   const orderCode = generateOrderCode();
@@ -788,7 +830,9 @@ app.post('/api/orders', async (req, res) => {
   invalidateInventory();
   await pushOrderToSheet(order, 10000);
 
-  return res.status(201).json({ message: 'Đặt vé thành công!', order, payment });
+  const body = { message: 'Đặt vé thành công!', order, payment };
+  setIdempotentResponse(idempotencyKey, 201, body);
+  return res.status(201).json(body);
 });
 
 app.get('/api/orders/:orderCode/status', async (req, res) => {
