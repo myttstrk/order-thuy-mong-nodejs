@@ -13,6 +13,19 @@ const request = async (fetchImpl, method, path, body, port) => {
   return { status: response.status, json };
 };
 
+test('GET /api/sepay-webhook responds successfully as a webhook health check', async () => {
+  const server = app.listen(0);
+  try {
+    const port = server.address().port;
+    const response = await global.fetch(`http://127.0.0.1:${port}/api/sepay-webhook`, { method: 'GET' });
+
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).success, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('POST /api/orders stores expiry metadata and marks orders as expired when time passes', async () => {
   process.env.ORDER_EXPIRY_MINUTES = '0.001';
   const server = app.listen(0);

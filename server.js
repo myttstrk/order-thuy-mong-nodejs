@@ -787,6 +787,20 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
   });
 });
 
+app.get('/api/sepay-webhook', (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: 'SePay webhook endpoint is ready.'
+  });
+});
+
+app.get('/api/public/sepay-webhook', (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: 'SePay webhook endpoint is ready.'
+  });
+});
+
 // XỬ LÝ WEBHOOK SEPAY TỰ ĐỘNG
 app.post('/api/sepay-webhook', async (req, res) => {
   const payload = req.body || {};
