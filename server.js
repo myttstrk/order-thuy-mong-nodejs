@@ -8,7 +8,7 @@ const dns = require('dns').promises;
 let nodemailer = null;
 try {
   nodemailer = require('nodemailer');
-} catch (_) {}
+} catch (_) { }
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -551,7 +551,7 @@ app.get('/api/config', async (req, res) => {
     }
     return ticket;
   });
-  
+
   const merchItems = allItems.filter(i => i.type === 'merch').map(merch => {
     if (merch.baseQuantity !== undefined) {
       const sold = soldQuantities[merch.id] || 0;
@@ -601,28 +601,28 @@ app.get('/api/captcha', (req, res) => {
   for (let i = 0; i < 5; i++) {
     cap += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  
+
   const secret = process.env.CAPTCHA_SECRET || 'f2e0625d9c22231ef2d0966bc08bf9b980ac905734ddcc738eed02ea06f51188';
   const hmac = crypto.createHmac('sha256', secret);
   hmac.update(cap);
   const hash = hmac.digest('hex');
-  
+
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="50">
     <rect width="100%" height="100%" fill="#2c2c2c"/>`;
-    
+
   for (let i = 0; i < 5; i++) {
     const x = 20 + i * 24 + Math.random() * 5;
     const y = 32 + Math.random() * 5;
     const rot = (Math.random() - 0.5) * 40;
     svg += `<text x="${x}" y="${y}" transform="rotate(${rot} ${x} ${y})" fill="#f1c66b" font-size="26" font-family="sans-serif" font-weight="bold">${cap[i]}</text>`;
   }
-  
+
   for (let i = 0; i < 10; i++) {
     svg += `<line x1="${Math.random() * 160}" y1="${Math.random() * 50}" x2="${Math.random() * 160}" y2="${Math.random() * 50}" stroke="#f1c66b" stroke-width="2" opacity="0.6"/>`;
   }
-  
+
   svg += `</svg>`;
-  
+
   res.json({ token: hash, image: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}` });
 });
 
@@ -639,10 +639,10 @@ app.post('/api/orders', async (req, res) => {
     if (!captcha || !captcha.token || !captcha.answer) {
       return res.status(400).json({ message: 'Vui lòng xác thực mã bảo vệ.' });
     }
-    
+
     const secret = process.env.CAPTCHA_SECRET || 'f2e0625d9c22231ef2d0966bc08bf9b980ac905734ddcc738eed02ea06f51188';
     const expectedHash = crypto.createHmac('sha256', secret).update(captcha.answer.toUpperCase()).digest('hex');
-    
+
     if (expectedHash !== captcha.token) {
       return res.status(400).json({ message: 'Mã bảo vệ không chính xác.' });
     }
@@ -901,7 +901,11 @@ app.all(webhookPaths, async (req, res) => {
 
     // 8. Đồng bộ Google Sheet
     const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
-    if (sheetWebhookUrl) {
+    if (!sheetWebhookUrl) {
+      console.warn('[SHEET WEBHOOK] Chưa cấu hình GOOGLE_SHEET_WEBHOOK_URL trong biến môi trường!');
+    } else {
+      console.log('[SHEET WEBHOOK] Bắt đầu gọi sang Google Sheet với URL:', sheetWebhookUrl);
+
       try {
         await fetchWithTimeout(sheetWebhookUrl, {
           method: 'POST',
@@ -920,9 +924,12 @@ app.all(webhookPaths, async (req, res) => {
             total: order.total
           })
         }, 7000);
+        const resText = await sheetRes.text();
+        console.log(`[SHEET WEBHOOK] Phản hồi từ Google Sheet (Status: ${sheetRes.status}):`, resText);
       } catch (sheetErr) {
-        console.warn('Lỗi đồng bộ Sheet:', sheetErr.message);
+        console.error('[SHEET WEBHOOK ERROR] Lỗi khi gọi Google Sheet:', sheetErr.message);
       }
+
     }
 
     return res.status(200).json({
@@ -997,7 +1004,7 @@ app.post('/api/admin/items', async (req, res) => {
   if (!newItem || !newItem.id || !newItem.name) {
     return res.status(400).json({ error: 'Thiếu thông tin bắt buộc (id, name).' });
   }
-  
+
   let items = readItems();
   const index = items.findIndex(i => i.id === newItem.id);
   const soldQuantities = await getInventory();
@@ -1016,7 +1023,7 @@ app.post('/api/admin/items', async (req, res) => {
     }
     items.push(newItem);
   }
-  
+
   if (saveItems(items)) {
     res.json({ success: true, item: items[index !== -1 ? index : items.length - 1] });
   } else {
