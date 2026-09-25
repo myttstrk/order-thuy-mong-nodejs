@@ -955,7 +955,15 @@ app.post('/api/admin/checkin', async (req, res) => {
     return res.status(400).json({ message: 'Mã QR không hợp lệ.' });
   }
 
-  const order = await findOrderPersistent(orderCode);
+  let order = await findOrderPersistent(orderCode);
+  if (!order) {
+    const allOrders = await readOrdersPersistent(5000);
+    order = allOrders.find(o => 
+      o.orderCode === orderCode || 
+      o.orderCode.replace(/[\s\-_]/g, '') === orderCode.replace(/[\s\-_]/g, '')
+    );
+  }
+
   if (!order) {
     return res.status(404).json({ message: 'Không tìm thấy vé tương ứng với mã QR.' });
   }
@@ -965,11 +973,19 @@ app.post('/api/admin/checkin', async (req, res) => {
   }
 
   if (order.ticketStatus === 'Đã sử dụng') {
+    const timeText = order.checkedInAt 
+      ? new Date(order.checkedInAt).toLocaleTimeString('vi-VN') 
+      : 'trước đó';
     return res.status(409).json({
-      message: 'Vé này đã được check-in trước đó!',
+      message: `Vé này đã được check-in lúc ${timeText}!`,
       order
     });
   }
+
+  // Cập nhật trạng thái vé và lưu vào database
+  order.ticketStatus = 'Đã sử dụng';
+  order.checkedInAt = new Date().toISOString();
+  await saveOrderPersistent(order);
 
   // Đồng bộ trạng thái check-in sang Google Sheet
   const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
@@ -1007,143 +1023,131 @@ app.post('/api/admin/checkin', async (req, res) => {
     }
   });
 });
+  // Middleware kiểm tra token hoặc basic session của Admin
+  function requireAdminAuth(req, res, next) {
+    const authHeader = req.headers['authorization'] || '';
+    const expectedToken = Buffer.from(
+      `${process.env.ADMIN_USERNAME || 'admin'}:${process.env.ADMIN_PASSWORD || 'admin123'}`
+    ).toString('base64');
 
-return res.status(200).json({
-  message: 'Check-in vé thành công!',
-  order: {
-    orderCode: order.orderCode,
-    customerName: order.customer?.name,
-    itemsStr: order.itemsStr || (order.items || []).map(i => `${i.name} (x${i.quantity})`).join(', '),
-    ticketStatus: order.ticketStatus,
-    checkedInAt: order.checkedInAt
-  }
-});
-
-// Middleware kiểm tra token hoặc basic session của Admin
-function requireAdminAuth(req, res, next) {
-  const authHeader = req.headers['authorization'] || '';
-  const expectedToken = Buffer.from(
-    `${process.env.ADMIN_USERNAME || 'admin'}:${process.env.ADMIN_PASSWORD || 'admin123'}`
-  ).toString('base64');
-
-  if (authHeader === `Basic ${expectedToken}` || req.headers['x-admin-token'] === expectedToken) {
-    return next();
-  }
-  return res.status(401).json({ message: 'Bạn chưa đăng nhập hoặc phiên làm việc đã hết hạn.' });
-}
-
-// API đăng nhập admin
-app.post('/api/admin/login', (req, res) => {
-  const { username, password } = req.body || {};
-  const expectedUser = process.env.ADMIN_USERNAME || 'admin';
-  const expectedPass = process.env.ADMIN_PASSWORD || 'admin123';
-
-  if (username === expectedUser && password === expectedPass) {
-    const token = Buffer.from(`${expectedUser}:${expectedPass}`).toString('base64');
-    return res.json({ success: true, token });
-  }
-
-  return res.status(401).json({ success: false, message: 'Sai tên đăng nhập hoặc mật khẩu.' });
-});
-// Quản lý mặt hàng
-app.get('/api/admin/items', async (req, res) => {
-  const items = readItems();
-  const soldQuantities = await getInventory();
-
-  const updatedItems = items.map(item => {
-    if (item.baseQuantity !== undefined) {
-      const sold = soldQuantities[item.id] || 0;
-      item.quantity = Math.max(0, item.baseQuantity - sold);
+    if (authHeader === `Basic ${expectedToken}` || req.headers['x-admin-token'] === expectedToken) {
+      return next();
     }
-    return item;
+    return res.status(401).json({ message: 'Bạn chưa đăng nhập hoặc phiên làm việc đã hết hạn.' });
+  }
+
+  // API đăng nhập admin
+  app.post('/api/admin/login', (req, res) => {
+    const { username, password } = req.body || {};
+    const expectedUser = process.env.ADMIN_USERNAME || 'admin';
+    const expectedPass = process.env.ADMIN_PASSWORD || 'admin123';
+
+    if (username === expectedUser && password === expectedPass) {
+      const token = Buffer.from(`${expectedUser}:${expectedPass}`).toString('base64');
+      return res.json({ success: true, token });
+    }
+
+    return res.status(401).json({ success: false, message: 'Sai tên đăng nhập hoặc mật khẩu.' });
+  });
+  // Quản lý mặt hàng
+  app.get('/api/admin/items', async (req, res) => {
+    const items = readItems();
+    const soldQuantities = await getInventory();
+
+    const updatedItems = items.map(item => {
+      if (item.baseQuantity !== undefined) {
+        const sold = soldQuantities[item.id] || 0;
+        item.quantity = Math.max(0, item.baseQuantity - sold);
+      }
+      return item;
+    });
+
+    res.json(updatedItems);
+  });
+  app.get('/api/admin/checkin-history', requireAdminAuth, async (req, res) => {
+    try {
+      const allOrders = await readOrdersPersistent(5000);
+      const scannedOrders = allOrders
+        .filter((o) => o.ticketStatus === 'Đã sử dụng' && o.checkedInAt)
+        .sort((a, b) => new Date(b.checkedInAt) - new Date(a.checkedInAt))
+        .map((o) => ({
+          orderCode: o.orderCode,
+          customerName: o.customer?.name || 'Khách',
+          customerPhone: o.customer?.phone || '',
+          itemsStr: o.itemsStr || (o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', '),
+          total: o.total,
+          checkedInAt: o.checkedInAt
+        }));
+
+      return res.json({ success: true, count: scannedOrders.length, data: scannedOrders });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+  app.post('/api/admin/items', async (req, res) => {
+    const newItem = req.body;
+    if (!newItem || !newItem.id || !newItem.name) {
+      return res.status(400).json({ error: 'Thiếu thông tin bắt buộc (id, name).' });
+    }
+
+    let items = readItems();
+    const index = items.findIndex(i => i.id === newItem.id);
+    const soldQuantities = await getInventory();
+    const sold = soldQuantities[newItem.id] || 0;
+
+    if (index !== -1) {
+      if (newItem.quantity !== undefined) {
+        newItem.baseQuantity = Number(newItem.quantity) + sold;
+        delete newItem.quantity;
+      }
+      items[index] = { ...items[index], ...newItem };
+    } else {
+      if (newItem.quantity !== undefined) {
+        newItem.baseQuantity = Number(newItem.quantity) + sold;
+        delete newItem.quantity;
+      }
+      items.push(newItem);
+    }
+
+    if (saveItems(items)) {
+      res.json({ success: true, item: items[index !== -1 ? index : items.length - 1] });
+    } else {
+      res.status(500).json({ error: 'Không thể lưu mặt hàng.' });
+    }
   });
 
-  res.json(updatedItems);
-});
-app.get('/api/admin/checkin-history', requireAdminAuth, async (req, res) => {
-  try {
-    const allOrders = await readOrdersPersistent(5000);
-    const scannedOrders = allOrders
-      .filter((o) => o.ticketStatus === 'Đã sử dụng' && o.checkedInAt)
-      .sort((a, b) => new Date(b.checkedInAt) - new Date(a.checkedInAt))
-      .map((o) => ({
-        orderCode: o.orderCode,
-        customerName: o.customer?.name || 'Khách',
-        customerPhone: o.customer?.phone || '',
-        itemsStr: o.itemsStr || (o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', '),
-        total: o.total,
-        checkedInAt: o.checkedInAt
-      }));
-
-    return res.json({ success: true, count: scannedOrders.length, data: scannedOrders });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-app.post('/api/admin/items', async (req, res) => {
-  const newItem = req.body;
-  if (!newItem || !newItem.id || !newItem.name) {
-    return res.status(400).json({ error: 'Thiếu thông tin bắt buộc (id, name).' });
-  }
-
-  let items = readItems();
-  const index = items.findIndex(i => i.id === newItem.id);
-  const soldQuantities = await getInventory();
-  const sold = soldQuantities[newItem.id] || 0;
-
-  if (index !== -1) {
-    if (newItem.quantity !== undefined) {
-      newItem.baseQuantity = Number(newItem.quantity) + sold;
-      delete newItem.quantity;
-    }
-    items[index] = { ...items[index], ...newItem };
-  } else {
-    if (newItem.quantity !== undefined) {
-      newItem.baseQuantity = Number(newItem.quantity) + sold;
-      delete newItem.quantity;
-    }
-    items.push(newItem);
-  }
-
-  if (saveItems(items)) {
-    res.json({ success: true, item: items[index !== -1 ? index : items.length - 1] });
-  } else {
-    res.status(500).json({ error: 'Không thể lưu mặt hàng.' });
-  }
-});
-
-app.get(['/admin', '/api/admin'], (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
-
-app.get(['/contact', '/api/contact'], (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'contact.html'));
-});
-
-app.use(express.static(path.join(__dirname, 'public')));
-
-// app.get('*', (req, res) => {
-//   res.sendFile(path.join(__dirname, 'public', 'index.html'));
-// });
-
-function startServer(port = PORT) {
-  return app.listen(port, () => {
-    console.log(`Thủy Mộng app is running at http://localhost:${port}`);
+  app.get(['/admin', '/api/admin'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
   });
-}
 
-if (require.main === module) {
-  startServer();
-}
+  app.get(['/contact', '/api/contact'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'contact.html'));
+  });
 
-module.exports = {
-  app,
-  startServer,
-  readOrders,
-  findOrderByCode,
-  saveOrder,
-  createQrCodeUrl,
-  sendResendEmail,
-  decodeQrPayload,
-  getOrderSummary
-};
+  app.use(express.static(path.join(__dirname, 'public')));
+
+  // app.get('*', (req, res) => {
+  //   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  // });
+
+  function startServer(port = PORT) {
+    return app.listen(port, () => {
+      console.log(`Thủy Mộng app is running at http://localhost:${port}`);
+    });
+  }
+
+  if (require.main === module) {
+    startServer();
+  }
+
+  module.exports = {
+    app,
+    startServer,
+    readOrders,
+    findOrderByCode,
+    saveOrder,
+    createQrCodeUrl,
+    sendResendEmail,
+    decodeQrPayload,
+    getOrderSummary
+  };
