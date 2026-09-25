@@ -1047,9 +1047,9 @@ app.get('/contact', (req, res) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// app.get('*', (req, res) => {
+//   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// });
 
 function startServer(port = PORT) {
   return app.listen(port, () => {
