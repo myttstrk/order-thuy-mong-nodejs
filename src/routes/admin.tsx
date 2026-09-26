@@ -102,9 +102,20 @@ function LoginForm({ onSuccess }: { onSuccess: (password: string) => void }) {
   );
 }
 
+type InventoryItem = {
+  id: string;
+  name: string;
+  type?: "ticket" | "merch" | string;
+  price?: number | string;
+  quantity?: number | null;
+  baseQuantity?: number | null;
+  benefit?: string;
+  image?: string;
+};
+
 function Dashboard({ password, onLogout }: { password: string; onLogout: () => void }) {
   const listOrders = useServerFn(adminListOrders);
-  const [tab, setTab] = useState<"orders" | "checkin">("orders");
+  const [tab, setTab] = useState<"orders" | "checkin" | "inventory">("orders");
   const [status, setStatus] = useState<"all" | "pending" | "paid" | "used" | "cancelled">("all");
   const [search, setSearch] = useState("");
   const [data, setData] = useState<OrdersResult | null>(null);
@@ -136,6 +147,9 @@ function Dashboard({ password, onLogout }: { password: string; onLogout: () => v
           </TabButton>
           <TabButton active={tab === "checkin"} onClick={() => setTab("checkin")}>
             Check-in QR
+          </TabButton>
+          <TabButton active={tab === "inventory"} onClick={() => setTab("inventory")}>
+            Tồn kho
           </TabButton>
           <button
             type="button"
@@ -233,11 +247,362 @@ function Dashboard({ password, onLogout }: { password: string; onLogout: () => v
               </table>
             </div>
           </>
-        ) : (
+        ) : tab === "checkin" ? (
           <CheckinPanel password={password} />
+        ) : (
+          <InventoryPanel />
         )}
       </div>
     </>
+  );
+}
+
+function InventoryPanel() {
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [openForm, setOpenForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    id: "",
+    title: "",
+    name: "",
+    type: "ticket",
+    price: "0",
+    quantity: "",
+    benefit: "",
+  });
+
+  async function refreshItems() {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch("/api/admin/items");
+      if (!response.ok) throw new Error("Không tải được danh sách sản phẩm.");
+      const data = await response.json();
+      setItems(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không tải được danh sách sản phẩm.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshItems();
+  }, []);
+
+  async function openEditor(item?: InventoryItem) {
+    const fallbackItem = item ?? items.find((entry) => entry.id === editingId) ?? null;
+
+    if (!fallbackItem) {
+      setEditingId(null);
+      setForm({
+        id: "",
+        title: "",
+        name: "",
+        type: "ticket",
+        price: "0",
+        quantity: "",
+        benefit: "",
+      });
+      setOpenForm(true);
+      return;
+    }
+
+    setEditingId(fallbackItem.id ?? null);
+    setForm({
+      id: fallbackItem.id ?? "",
+      title: fallbackItem.title ?? fallbackItem.name ?? "",
+      name: fallbackItem.name ?? "",
+      type: fallbackItem.type ?? "ticket",
+      price: String(fallbackItem.price ?? 0),
+      quantity: fallbackItem.baseQuantity != null ? String(fallbackItem.baseQuantity) : "",
+      benefit: fallbackItem.benefit ?? "",
+    });
+    setOpenForm(true);
+
+    try {
+      setError(null);
+      const response = await fetch("/api/admin/items");
+      if (!response.ok) throw new Error("Không tải được thông tin mặt hàng.");
+      const list = await response.json();
+      const found = Array.isArray(list) ? list.find((entry: InventoryItem) => entry.id === fallbackItem.id) : null;
+      if (!found) throw new Error("Không tìm thấy sản phẩm cần sửa.");
+
+      setEditingId(found.id ?? null);
+      setForm({
+        id: found.id ?? "",
+        title: found.title ?? found.name ?? "",
+        name: found.name ?? "",
+        type: found.type ?? "ticket",
+        price: String(found.price ?? 0),
+        quantity: found.baseQuantity != null ? String(found.baseQuantity) : "",
+        benefit: found.benefit ?? "",
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không mở được form sửa.");
+    }
+  }
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+
+    const payload = {
+      id: form.id.trim(),
+      name: form.name.trim(),
+      title: (form.title || form.name).trim(),
+      type: form.type,
+      price: Number(form.price || 0),
+      benefit: form.benefit.trim(),
+    };
+
+    if (!payload.id || !payload.name) {
+      setError("Vui lòng nhập đủ mã và tên sản phẩm.");
+      return;
+    }
+
+    if (form.quantity.trim() !== "") {
+      payload.quantity = Number(form.quantity);
+    }
+
+    try {
+      setSaving(true);
+      setError(null);
+      const response = await fetch("/api/admin/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || "Không lưu được sản phẩm.");
+      setOpenForm(false);
+      setEditingId(null);
+      await refreshItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Không lưu được sản phẩm.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onDelete(itemId: string) {
+    const ok = window.confirm(`Xóa mặt hàng "${itemId}" khỏi hệ thống?`);
+    if (!ok) return;
+
+    try {
+      setError(null);
+      const response = await fetch(`/api/admin/items/${itemId}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error || "Xóa thất bại.");
+      await refreshItems();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Xóa thất bại.");
+    }
+  }
+
+  return (
+    <div className="mt-7 surface-panel p-7">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-2xl text-foreground">Quản lý tồn kho</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Theo dõi tổng kho và số lượng còn lại của vé / merch.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void openEditor()}
+          className="rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-110"
+        >
+          + Thêm mặt hàng
+        </button>
+      </div>
+
+      {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
+
+      <div className="mt-6 overflow-x-auto">
+        <table className="w-full min-w-[760px] text-left text-sm">
+          <thead className="border-b border-border text-xs uppercase tracking-[0.14em] text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3">Tên</th>
+              <th className="px-4 py-3">Mã</th>
+              <th className="px-4 py-3">Loại</th>
+              <th className="px-4 py-3">Giá</th>
+              <th className="px-4 py-3">Tổng kho</th>
+              <th className="px-4 py-3">Còn lại</th>
+              <th className="px-4 py-3">Hành động</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {loading ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                  Đang tải danh sách sản phẩm...
+                </td>
+              </tr>
+            ) : items.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                  Chưa có mặt hàng nào.
+                </td>
+              </tr>
+            ) : (
+              items.map((item) => {
+                const totalStock = item.baseQuantity != null ? item.baseQuantity : item.quantity ?? 0;
+                const remaining = item.quantity != null ? item.quantity : totalStock;
+                return (
+                  <tr key={item.id}>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-foreground">{item.name}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{item.title || item.name}</div>
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-primary">{item.id}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{item.type === "merch" ? "Merch" : "Vé"}</td>
+                    <td className="px-4 py-3 font-mono">{formatVnd(Number(item.price ?? 0))}</td>
+                    <td className="px-4 py-3 font-mono">{totalStock}</td>
+                    <td className="px-4 py-3 font-mono text-primary">{remaining}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void openEditor(item)}
+                          className="rounded-full border border-border px-3 py-1.5 text-xs transition hover:border-primary/60 hover:text-primary"
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void onDelete(item.id)}
+                          className="rounded-full border border-destructive/60 px-3 py-1.5 text-xs text-destructive transition hover:bg-destructive/10"
+                        >
+                          Xóa
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {openForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-3xl border border-border bg-background p-6 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="font-display text-xl text-foreground">
+                {editingId ? "Sửa mặt hàng" : "Thêm mặt hàng"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setOpenForm(false)}
+                className="text-sm text-muted-foreground transition hover:text-foreground"
+              >
+                Đóng
+              </button>
+            </div>
+
+            <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-2 text-sm md:col-span-2">
+                <span className="text-muted-foreground">Title hiển thị</span>
+                <input
+                  value={form.title}
+                  onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground outline-none focus:border-primary/60"
+                  placeholder="VD: Combo merch độc quyền"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm">
+                <span className="text-muted-foreground">Mã sản phẩm</span>
+                <input
+                  value={form.id}
+                  onChange={(e) => setForm((p) => ({ ...p, id: e.target.value }))}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground outline-none focus:border-primary/60"
+                  placeholder="vd: combo-merch"
+                  required
+                />
+              </label>
+
+              <label className="space-y-2 text-sm">
+                <span className="text-muted-foreground">Tên mặt hàng</span>
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground outline-none focus:border-primary/60"
+                  placeholder="Tên mặt hàng"
+                  required
+                />
+              </label>
+
+              <label className="space-y-2 text-sm">
+                <span className="text-muted-foreground">Loại</span>
+                <select
+                  value={form.type}
+                  onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground outline-none focus:border-primary/60"
+                >
+                  <option value="ticket">Vé</option>
+                  <option value="merch">Merch</option>
+                </select>
+              </label>
+
+              <label className="space-y-2 text-sm">
+                <span className="text-muted-foreground">Giá bán</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.price}
+                  onChange={(e) => setForm((p) => ({ ...p, price: e.target.value }))}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground outline-none focus:border-primary/60"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm md:col-span-2">
+                <span className="text-muted-foreground">Tổng số lượng kho</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.quantity}
+                  onChange={(e) => setForm((p) => ({ ...p, quantity: e.target.value }))}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground outline-none focus:border-primary/60"
+                  placeholder="Ví dụ: 50"
+                />
+              </label>
+
+              <label className="space-y-2 text-sm md:col-span-2">
+                <span className="text-muted-foreground">Quyền lợi / mô tả</span>
+                <textarea
+                  rows={4}
+                  value={form.benefit}
+                  onChange={(e) => setForm((p) => ({ ...p, benefit: e.target.value }))}
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-foreground outline-none focus:border-primary/60"
+                  placeholder="Mô tả quyền lợi của sản phẩm"
+                />
+              </label>
+
+              <div className="md:col-span-2 flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setOpenForm(false)}
+                  className="rounded-full border border-border px-5 py-2.5 text-sm text-foreground transition hover:border-primary/60 hover:text-primary"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {saving ? "Đang lưu..." : editingId ? "Lưu thay đổi" : "Thêm mới"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -471,11 +836,10 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-5 py-2.5 text-sm transition ${
-        active
+      className={`rounded-full px-5 py-2.5 text-sm transition ${active
           ? "bg-primary text-primary-foreground"
           : "border border-border text-muted-foreground hover:text-foreground"
-      }`}
+        }`}
     >
       {children}
     </button>

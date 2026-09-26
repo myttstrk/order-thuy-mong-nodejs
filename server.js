@@ -90,11 +90,17 @@ function saveItems(items) {
 
 async function readItemsPersistent() {
   const localItems = readItems();
+
   if (!supabaseEnabled) return localItems;
 
   try {
     const rows = await supabaseRequest('items?select=item_data&order=updated_at.desc');
     const remoteItems = Array.isArray(rows) ? rows.map((row) => row.item_data).filter(Boolean) : [];
+
+    if (Array.isArray(localItems) && localItems.length > 0) {
+      return localItems;
+    }
+
     return remoteItems.length ? remoteItems : localItems;
   } catch (error) {
     console.warn('Supabase items read failed, falling back to local file store:', error.message);
@@ -117,9 +123,9 @@ async function saveItemsPersistent(items) {
         updated_at: new Date().toISOString()
       })
     })));
-    return true;
+    return localSaved;
   } catch (error) {
-    console.warn('Supabase items save failed, falling back to local file store:', error.message);
+    console.warn('Supabase items sync failed; local file remains source of truth:', error.message);
     return localSaved;
   }
 }
@@ -1263,13 +1269,13 @@ app.post('/api/admin/items', async (req, res) => {
 
   if (index !== -1) {
     if (newItem.quantity !== undefined) {
-      newItem.baseQuantity = Number(newItem.quantity) + sold;
+      newItem.baseQuantity = Number(newItem.quantity);
       delete newItem.quantity;
     }
     items[index] = { ...items[index], ...newItem };
   } else {
     if (newItem.quantity !== undefined) {
-      newItem.baseQuantity = Number(newItem.quantity) + sold;
+      newItem.baseQuantity = Number(newItem.quantity);
       delete newItem.quantity;
     }
     items.push(newItem);

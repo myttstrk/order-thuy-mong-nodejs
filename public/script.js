@@ -698,18 +698,19 @@ function renderCart() {
 
 async function loadData() {
   try {
-    const response = await fetch('/api/config');
-    const data = await response.json();
+    const response = await fetch('/api/admin/items');
+    const items = await response.json();
+    const catalog = Array.isArray(items) ? items : [];
 
-    appState.tickets = data.tickets;
-    appState.merch = data.merch;
+    appState.tickets = catalog.filter((item) => item.type === 'ticket');
+    appState.merch = catalog.filter((item) => item.type === 'merch');
 
     const footerList = document.querySelectorAll('.site-footer li');
-    if (data.contact && footerList.length >= 4) {
-      footerList[0].textContent = data.contact.unit;
-      footerList[1].textContent = data.contact.address;
-      footerList[2].textContent = data.contact.phone;
-      footerList[3].textContent = data.contact.email;
+    if (footerList.length >= 4) {
+      footerList[0].textContent = 'Nhà Hát Múa Rối Việt Nam';
+      footerList[1].textContent = '361 Trường Chinh, Thanh Xuân, Hà Nội';
+      footerList[2].textContent = '0327264235';
+      footerList[3].textContent = 'myth.superking@gmail.com';
     }
 
     renderTickets();

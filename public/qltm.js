@@ -528,12 +528,17 @@ async function loadItems() {
     if (!res.ok) throw new Error('Không thể tải mặt hàng');
     const items = await res.json();
     
-    itemsTableBody.innerHTML = items.map(item => `
+    itemsTableBody.innerHTML = items.map(item => {
+      const totalStock = item.baseQuantity !== undefined && item.baseQuantity !== null ? Number(item.baseQuantity) : 0;
+      const remainingStock = item.quantity !== undefined && item.quantity !== null ? Math.max(0, Number(item.quantity)) : totalStock;
+      const displayTitle = item.title || item.name || '—';
+
+      return `
       <tr>
         <td>
           ${item.image ? `<img src="${item.image}" alt="${item.name}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;" />` : '<div style="width: 50px; height: 50px; background: #eee; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #888;">No IMG</div>'}
         </td>
-        <td><strong>${item.name}</strong><br/><small style="color: #666;">Kho: ${item.baseQuantity !== undefined && item.baseQuantity !== null ? item.baseQuantity : 'Vô hạn'}</small></td>
+        <td><strong>${item.name}</strong><br/><small style="color: #666;">${displayTitle}</small><br/><small style="color: #666;">Kho: ${totalStock} · Còn: ${remainingStock}</small></td>
         <td><code>${item.id}</code></td>
         <td>${item.type === 'ticket' ? 'Vé (Ticket)' : 'Ấn phẩm (Merch)'}</td>
         <td>${formatCurrency(item.price)}</td>
@@ -554,6 +559,7 @@ async function loadItems() {
         const item = items.find(i => i.id === id);
         if (item) {
           currentEditingItemId = item.id;
+          document.getElementById('itemTitle').value = item.title || item.name || '';
           document.getElementById('itemName').value = item.name;
           document.getElementById('itemId').value = item.id;
           document.getElementById('itemType').value = item.type;
@@ -600,6 +606,7 @@ itemForm.addEventListener('submit', async (e) => {
     const newItem = {
       id: document.getElementById('itemId').value.trim(),
       name: document.getElementById('itemName').value.trim(),
+      title: document.getElementById('itemTitle').value.trim() || document.getElementById('itemName').value.trim(),
       type: document.getElementById('itemType').value,
       price: Number(document.getElementById('itemPrice').value),
       benefit: document.getElementById('itemBenefit').value.trim()

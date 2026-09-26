@@ -405,7 +405,7 @@
     </div>
   </div>
 
-  <div id="inventory-modal-overlay" class="modal-overlay" style="display: none;">
+  <div id="inventory-modal-overlay" class="modal-overlay">
     <div class="modal-content" style="max-width: 560px; text-align: left;">
       <div class="page-toolbar" style="margin-bottom: 16px;">
         <h3 class="page-title" id="inventory-modal-title" style="font-size: 1.15rem;">Thêm mặt hàng</h3>
@@ -413,6 +413,7 @@
       </div>
 
       <form id="inventory-form" style="display: flex; flex-direction: column; gap: 12px;">
+        <input type="text" id="inventory-title" placeholder="Title hiển thị / tên gọi ngắn" style="padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
         <input type="text" id="inventory-name" placeholder="Tên mặt hàng" required style="padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
         <input type="text" id="inventory-id" placeholder="ID sản phẩm (ví dụ: tu-linh)" required style="padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
         <select id="inventory-type" required style="padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
@@ -420,7 +421,7 @@
           <option value="merch">Merch</option>
         </select>
         <input type="number" id="inventory-price" placeholder="Giá bán (VNĐ)" min="0" required style="padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
-        <input type="number" id="inventory-quantity" placeholder="Số lượng tồn kho (để trống nếu vô hạn)" min="0" style="padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
+        <input type="number" id="inventory-quantity" placeholder="Tổng số lượng kho (không cộng số đã bán)" min="0" style="padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px;">
         <textarea id="inventory-benefit" rows="3" placeholder="Mô tả / quyền lợi" style="padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; resize: vertical;"></textarea>
         <input type="file" id="inventory-image" accept="image/*" style="padding: 8px; border: 1px solid #ddd; border-radius: 8px;">
 
@@ -435,6 +436,8 @@
     let scanner = null;
     let isScanning = true;
     let modalTimer = null;
+    let inventoryEditingId = null;
+
     function getAuthHeader() {
       const token = localStorage.getItem('tm_admin_token');
       return token ? { 'x-admin-token': token } : {};
@@ -662,8 +665,10 @@
         }
 
         tbody.innerHTML = items.map((item) => {
-          const quantity = item.baseQuantity !== undefined && item.baseQuantity !== null ? item.baseQuantity : 'Vô hạn';
+          const totalStock = item.baseQuantity !== undefined && item.baseQuantity !== null ? Number(item.baseQuantity) : 0;
+          const remainingStock = item.quantity !== undefined && item.quantity !== null ? Math.max(0, Number(item.quantity)) : totalStock;
           const typeLabel = item.type === 'merch' ? 'Merch' : 'Vé';
+          const displayTitle = item.title || item.name || '—';
           const imageHtml = item.image
             ? `<img src="${item.image}" alt="${item.name}" style="width: 52px; height: 52px; object-fit: cover; border-radius: 8px; border: 1px solid #ddd;" />`
             : '<div style="width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; font-size: 10px; color: #777;">IMG</div>';
@@ -671,11 +676,17 @@
           return `
             <tr>
               <td>${imageHtml}</td>
-              <td><strong>${item.name}</strong></td>
+              <td>
+                <strong>${item.name}</strong><br>
+                <small style="color: #555;">${displayTitle}</small>
+              </td>
               <td><span style="font-family: monospace; font-size: 12px;">${item.id}</span></td>
               <td>${typeLabel}</td>
               <td>${Number(item.price || 0).toLocaleString('vi-VN')}đ</td>
-              <td>${quantity}</td>
+              <td>
+                <div><strong>${totalStock}</strong></div>
+                <small style="color: #666;">Còn: ${remainingStock}</small>
+              </td>
               <td style="max-width: 220px; white-space: normal; color: #555;">${item.benefit || '—'}</td>
               <td>
                 <button type="button" class="toolbar-button" data-edit-item="${item.id}" style="padding: 6px 10px; font-size: 12px; margin-right: 6px;">Sửa</button>
@@ -729,21 +740,31 @@
       const modalTitle = document.getElementById('inventory-modal-title');
       if (!overlay || !form || !modalTitle) return;
 
+      inventoryEditingId = item?.id || null;
       form.reset();
+      document.getElementById('inventory-title').value = item?.title || item?.name || '';
       document.getElementById('inventory-name').value = item?.name || '';
       document.getElementById('inventory-id').value = item?.id || '';
       document.getElementById('inventory-type').value = item?.type || 'ticket';
       document.getElementById('inventory-price').value = item?.price || 0;
-      document.getElementById('inventory-quantity').value = item?.baseQuantity !== undefined && item?.baseQuantity !== null ? item.baseQuantity : '';
+      const stockValue = item?.baseQuantity !== undefined && item?.baseQuantity !== null
+        ? item.baseQuantity
+        : (item?.quantity !== undefined && item?.quantity !== null ? item.quantity : '');
+      document.getElementById('inventory-quantity').value = stockValue;
       document.getElementById('inventory-benefit').value = item?.benefit || '';
       document.getElementById('inventory-image').value = '';
       modalTitle.textContent = item ? 'Sửa mặt hàng' : 'Thêm mặt hàng';
+      overlay.classList.add('active');
       overlay.style.display = 'flex';
     }
 
     function closeInventoryModal() {
       const overlay = document.getElementById('inventory-modal-overlay');
-      if (overlay) overlay.style.display = 'none';
+      inventoryEditingId = null;
+      if (overlay) {
+        overlay.classList.remove('active');
+        overlay.style.display = 'none';
+      }
     }
 
     async function handleInventorySubmit(event) {
@@ -752,13 +773,16 @@
       const item = {
         id: document.getElementById('inventory-id').value.trim(),
         name: document.getElementById('inventory-name').value.trim(),
+        title: document.getElementById('inventory-title').value.trim() || document.getElementById('inventory-name').value.trim(),
         type: document.getElementById('inventory-type').value,
         price: Number(document.getElementById('inventory-price').value || 0),
         benefit: document.getElementById('inventory-benefit').value.trim(),
       };
 
       const quantityValue = document.getElementById('inventory-quantity').value.trim();
-      if (quantityValue !== '') item.quantity = Number(quantityValue);
+      if (quantityValue !== '') {
+        item.baseQuantity = Number(quantityValue);
+      }
 
       const imageFile = document.getElementById('inventory-image').files && document.getElementById('inventory-image').files[0];
       if (imageFile) {
