@@ -97,10 +97,12 @@ test('POST /api/orders creates a pending order with total and orderCode', async 
     assert.equal(result.json.order.status, 'Chờ thanh toán');
     assert.equal(result.json.order.total, 200000);
     assert.ok(result.json.order.orderCode);
+    assert.ok(result.json.order.expiresAt);
 
     const status = await request(global.fetch, 'GET', `/api/orders/${result.json.order.orderCode}/status?email=a%40example.com`, null, port);
     assert.equal(status.status, 200);
     assert.equal(status.json.order.status, 'Chờ thanh toán');
+    assert.ok(status.json.order.expiresAt);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

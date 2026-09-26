@@ -764,12 +764,17 @@ app.post('/api/orders', async (req, res) => {
   }
 
   // NẾU ĐÃ CÓ ĐƠN CHỜ THANH TOÁN -> DẪN VỀ MÃ QR ĐƠN CŨ NGAY (TIẾT KIỆM TÀI NGUYÊN VERCEL & TRÁNH SPAM)
+  
   if (existingPendingOrder) {
     const existingPayment = createBankPayment(existingPendingOrder);
+    const existingExpiresAt = new Date(new Date(existingPendingOrder.createdAt).getTime() + ORDER_EXPIRY_MS).toISOString();
     return res.status(200).json({
       message: 'Bạn có một đơn hàng đang chờ thanh toán. Đang chuyển bạn đến mã thanh toán...',
       isExistingOrder: true,
-      order: existingPendingOrder,
+      order: {
+        ...existingPendingOrder,
+        expiresAt: existingExpiresAt
+      },
       payment: existingPayment
     });
   }
@@ -790,6 +795,7 @@ app.post('/api/orders', async (req, res) => {
   const total = calculateOrderTotal(items);
   const orderCode = generateOrderCode();
   const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + ORDER_EXPIRY_MS).toISOString();
   const normalizedPaymentMethod = String(paymentMethod || 'BANK_TRANSFER').toUpperCase();
   const proofImage = String(req.body?.proofImage || '').trim();
   const deliveryLocation = String(req.body?.deliveryLocation || 'Nhận tại sự kiện').trim();
@@ -811,6 +817,7 @@ app.post('/api/orders', async (req, res) => {
     status: 'Chờ thanh toán',
     ticketStatus: 'Chưa thanh toán',
     createdAt: now,
+    expiresAt,
     qrCodeUrl: null,
     emailSent: false,
     checkedInAt: null,
@@ -866,6 +873,8 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
     return res.status(404).json({ message: 'Không tìm thấy đơn hàng.' });
   }
 
+  const orderExpiresAt = order.expiresAt || new Date(new Date(order.createdAt || Date.now()).getTime() + ORDER_EXPIRY_MS).toISOString();
+
   return res.json({
     order: {
       orderCode: order.orderCode,
@@ -877,7 +886,9 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
       emailSent: order.emailSent,
       emailError: order.emailError || null,
       paidAt: order.paidAt || null,
-      checkedInAt: order.checkedInAt || null
+      checkedInAt: order.checkedInAt || null,
+      createdAt: order.createdAt,
+      expiresAt: orderExpiresAt
     }
   });
 });

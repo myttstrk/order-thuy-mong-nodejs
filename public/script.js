@@ -2,7 +2,8 @@ const appState = {
   tickets: [],
   merch: [],
   cart: [],
-  paymentPollTimer: null
+  paymentPollTimer: null,
+  paymentExpiryTimer: null
 };
 
 const formatCurrency = (value) => new Intl.NumberFormat('vi-VN', {
@@ -24,6 +25,38 @@ function showToast(message) {
   toast.classList.add('show');
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 2200);
+}
+
+function formatCountdownMs(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function startExpiryCountdown(expiresAt, container = document.getElementById('payment-account-info')) {
+  if (!expiresAt || !container) return;
+
+  clearInterval(appState.paymentExpiryTimer);
+
+  const targetTime = new Date(expiresAt).getTime();
+  const countdownEl = container.querySelector('.expiry-countdown');
+
+  const updateCountdown = () => {
+    const remainingMs = targetTime - Date.now();
+    if (!countdownEl) return;
+
+    if (remainingMs <= 0) {
+      countdownEl.textContent = 'Hết thời gian thanh toán: 00:00';
+      clearInterval(appState.paymentExpiryTimer);
+      return;
+    }
+
+    countdownEl.textContent = `Thời gian giữ vé: ${formatCountdownMs(remainingMs)}`;
+  };
+
+  updateCountdown();
+  appState.paymentExpiryTimer = setInterval(updateCountdown, 1000);
 }
 
 function showPaymentSuccessModal(order = null) {
@@ -59,8 +92,7 @@ async function cancelPendingOrder(orderCode) {
       paymentInfoEl.innerHTML = `
         <div class="cancelled-order-box">
           <h4>Đơn hàng đã được hủy</h4>
-          <p>Đơn <strong>${orderCode}</strong> đã chuyển thành <strong>Đã hủy</strong> và slot đã được giải phóng.</p>
-          <p>Bạn có thể đặt lại đơn mới ngay bây giờ.</p>
+          <p>Đơn <strong>${orderCode}</strong> đã hủy.</p>
         </div>
       `;
     }
@@ -199,9 +231,21 @@ function startPaymentStatusPolling(orderCode, email) {
       const response = await fetch(`/api/orders/${encodeURIComponent(orderCode)}/status${query}`);
       if (!response.ok) return;
       const result = await response.json();
+
+      if (result.order.status === 'Chờ thanh toán' && result.order.expiresAt) {
+        const paymentInfoEl = document.getElementById('payment-account-info');
+        if (paymentInfoEl) {
+          const existingCountdown = paymentInfoEl.querySelector('.expiry-countdown');
+          if (existingCountdown) {
+            startExpiryCountdown(result.order.expiresAt, paymentInfoEl);
+          }
+        }
+      }
+
       renderPaidOrderStatus(result.order);
       if (result.order.status === 'Đã thanh toán') {
         clearInterval(appState.paymentPollTimer);
+        clearInterval(appState.paymentExpiryTimer);
         showToast('Đã nhận thanh toán và cập nhật trạng thái đơn hàng.');
         appState.cart = [];
         renderCart();
@@ -765,9 +809,12 @@ checkoutForm.addEventListener('submit', async (event) => {
         <p><strong>Số tiền:</strong> ${formatCurrency(result.order.total)}</p>
         <p><strong>Nội dung chuyển khoản:</strong> ${payment.transferContent}</p>
         <p><strong>Ngân hàng:</strong> ${payment.bankName} · <strong>STK:</strong> ${payment.accountNumber}</p>
+        <div class="expiry-countdown" aria-live="polite">Đang tính thời gian giữ vé...</div>
         <p class="payment-note">Sau khi chuyển khoản thành công, hệ thống sẽ tự động xác nhận thanh toán và hiển thị QR check-in ngay trên màn hình cho bạn.</p>
         <button type="button" class="btn btn-secondary cancel-order-btn" data-order-code="${result.order.orderCode}">Hủy đơn</button>
       `;
+
+      startExpiryCountdown(result.order.expiresAt, paymentInfoEl);
 
       const cancelBtn = paymentInfoEl.querySelector('.cancel-order-btn');
       if (cancelBtn) {

@@ -557,6 +557,18 @@ small {
   color: #f3e7c8;
 }
 
+.expiry-countdown {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #d7fce9;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
 .cancel-order-btn {
   margin-top: 16px;
   width: 100%;
