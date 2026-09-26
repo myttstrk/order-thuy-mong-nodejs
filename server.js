@@ -957,23 +957,28 @@ app.post('/api/orders/:orderCode/cancel', async (req, res) => {
     return res.status(400).json({ message: 'Đơn hàng đã thanh toán thành công, không thể hủy.' });
   }
 
-  // Trên DB lưu trạng thái Đã hủy để giải phóng giỏ hàng
+  // 1. Cập nhật DB
   order.status = 'Đã hủy';
   await saveOrderPersistent(order);
   inventoryCacheTime = 0;
 
-  // Gửi lệnh xóa dòng này trên Google Sheet (vì khách chủ động hủy)
+  // 2. Đồng bộ sang Google Sheet - BẮT BUỘC DÙNG AWAIT TRÊN VERCEL
   const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
   if (sheetWebhookUrl) {
-    fetchWithTimeout(sheetWebhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      redirect: 'follow',
-      body: JSON.stringify({
-        action: 'CANCEL_ORDER',
-        orderCode: order.orderCode
-      })
-    }, 5000).catch((err) => console.warn('Lỗi báo hủy sang Sheet:', err.message));
+    try {
+      await fetchWithTimeout(sheetWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        redirect: 'follow', // Bắt buộc cho Apps Script 302
+        body: JSON.stringify({
+          action: 'CANCEL_ORDER',
+          orderCode: order.orderCode
+        })
+      }, 7000);
+      console.log(`[CANCEL SUCCESS] Đã gửi lệnh xóa đơn ${order.orderCode} sang Google Sheet.`);
+    } catch (err) {
+      console.warn('[CANCEL ERROR] Lỗi xóa đơn trên Sheet:', err.message);
+    }
   }
 
   return res.json({ success: true, message: 'Đã hủy đơn hàng thành công.' });

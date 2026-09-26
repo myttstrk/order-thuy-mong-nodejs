@@ -227,8 +227,7 @@ async function cancelPendingOrder(orderCode) {
     });
 
     const result = await response.json();
-    
-    // Nếu đơn đã thanh toán thành công thì mới báo lỗi không cho hủy
+
     if (!response.ok && result.message && result.message.includes('đã thanh toán')) {
       showToast(result.message);
       return;
@@ -236,7 +235,8 @@ async function cancelPendingOrder(orderCode) {
   } catch (error) {
     console.warn('Lỗi gọi API hủy đơn:', error);
   } finally {
-    // LUÔN LUÔN xóa LocalStorage và tắt modal để khách được tạo đơn mới
+    clearInterval(appState.paymentPollTimer);
+    clearInterval(appState.paymentExpiryTimer);
     clearPendingOrder();
     hidePendingOrderRecoveryModal();
 
@@ -249,7 +249,7 @@ async function cancelPendingOrder(orderCode) {
         </div>
       `;
     }
-    showToast('Đã hủy đơn hàng.');
+    showToast('Đã hủy đơn hàng thành công.');
   }
 }
 
@@ -1042,17 +1042,26 @@ if (pendingOrderContinueBtn) {
   });
 }
 
-const pendingOrderCancelBtn = document.getElementById('pending-order-cancel');
+const pendingOrderCancelBtn = document.getElementById('pending-order-cancel-btn') || document.getElementById('pending-order-cancel');
 if (pendingOrderCancelBtn) {
   pendingOrderCancelBtn.addEventListener('click', async () => {
-    const stored = getStoredPendingOrder();
-    if (!stored?.orderCode) {
-      hidePendingOrderRecoveryModal();
-      return;
-    }
+    const order = appState.pendingOrderRecovery || getStoredPendingOrder();
+    const orderCode = order?.orderCode;
 
-    hidePendingOrderRecoveryModal();
-    await cancelPendingOrder(stored.orderCode);
+    pendingOrderCancelBtn.disabled = true;
+    pendingOrderCancelBtn.textContent = 'Đang hủy...';
+
+    try {
+      if (orderCode) {
+        await cancelPendingOrder(orderCode);
+      } else {
+        clearPendingOrder();
+        hidePendingOrderRecoveryModal();
+      }
+    } finally {
+      pendingOrderCancelBtn.disabled = false;
+      pendingOrderCancelBtn.textContent = 'Hủy đơn';
+    }
   });
 }
 
