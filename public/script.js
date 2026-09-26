@@ -214,7 +214,11 @@ async function continuePendingOrder(orderCode, email) {
   }
 }
 async function cancelPendingOrder(orderCode) {
-  if (!orderCode) return;
+  if (!orderCode) {
+    clearPendingOrder();
+    hidePendingOrderRecoveryModal();
+    return;
+  }
 
   try {
     const response = await fetch(`/api/orders/${encodeURIComponent(orderCode)}/cancel`, {
@@ -223,32 +227,29 @@ async function cancelPendingOrder(orderCode) {
     });
 
     const result = await response.json();
-    if (!response.ok) throw new Error(result.message || 'Không thể hủy đơn hàng.');
+    
+    // Nếu đơn đã thanh toán thành công thì mới báo lỗi không cho hủy
+    if (!response.ok && result.message && result.message.includes('đã thanh toán')) {
+      showToast(result.message);
+      return;
+    }
+  } catch (error) {
+    console.warn('Lỗi gọi API hủy đơn:', error);
+  } finally {
+    // LUÔN LUÔN xóa LocalStorage và tắt modal để khách được tạo đơn mới
+    clearPendingOrder();
+    hidePendingOrderRecoveryModal();
 
     const paymentInfoEl = document.getElementById('payment-account-info');
     if (paymentInfoEl) {
       paymentInfoEl.innerHTML = `
-        <div class="cancelled-order-box">
-          <h4>Đơn hàng đã được hủy</h4>
-          <p>Đơn <strong>${orderCode}</strong> đã hủy.</p>
+        <div class="cancelled-order-box" style="padding: 16px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px; text-align: center;">
+          <h4 style="color: #c53030; margin-top: 0;">Đơn hàng đã được hủy</h4>
+          <p style="margin: 0; color: #4a5568;">Bạn có thể chọn lại vé và đặt đơn mới ngay bây giờ.</p>
         </div>
       `;
     }
-
-    clearPendingOrder();
-    hidePendingOrderRecoveryModal();
-    appState.cart = [];
-    renderCart();
-    updateCartButton();
-    showToast('Đã hủy đơn hàng. Bạn có thể tạo đơn mới ngay lập tức.');
-
-    const submitBtn = document.querySelector('#checkout-form button[type="submit"]');
-    if (submitBtn) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Thanh toán bằng QR';
-    }
-  } catch (error) {
-    showToast(error.message || 'Không thể hủy đơn hàng.');
+    showToast('Đã hủy đơn hàng.');
   }
 }
 

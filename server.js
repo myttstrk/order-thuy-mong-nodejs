@@ -949,6 +949,7 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
   });
 });
 
+// POST /api/orders/:orderCode/cancel
 app.post('/api/orders/:orderCode/cancel', async (req, res) => {
   const { orderCode } = req.params;
   const order = await findOrderPersistent(orderCode);
@@ -957,12 +958,18 @@ app.post('/api/orders/:orderCode/cancel', async (req, res) => {
     return res.status(404).json({ message: 'Không tìm thấy đơn hàng.' });
   }
 
-  if (order.status === 'Chờ thanh toán') {
+  // Không được hủy đơn đã thanh toán thành công
+  if (order.status === 'Đã thanh toán') {
+    return res.status(400).json({ message: 'Đơn hàng đã thanh toán thành công, không thể hủy.' });
+  }
+
+  // Cho phép hủy nếu đơn đang Chờ thanh toán, Đã hết hạn hoặc đã Đã hủy từ trước
+  if (order.status === 'Chờ thanh toán' || order.status === 'Đã hết hạn') {
     order.status = 'Đã hủy';
     await saveOrderPersistent(order);
     inventoryCacheTime = 0;
 
-    // Gửi tín hiệu sang Google Sheet để xóa hoặc đánh dấu hủy dòng này
+    // Gửi tín hiệu sang Google Sheet xóa dòng đơn
     const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
     if (sheetWebhookUrl) {
       fetchWithTimeout(sheetWebhookUrl, {
@@ -972,13 +979,11 @@ app.post('/api/orders/:orderCode/cancel', async (req, res) => {
           action: 'CANCEL_ORDER',
           orderCode: order.orderCode
         })
-      }, 5000).catch(err => console.warn('Lỗi báo hủy sang Sheet:', err.message));
+      }, 5000).catch((err) => console.warn('Lỗi báo hủy sang Sheet:', err.message));
     }
-
-    return res.json({ success: true, message: 'Đã hủy đơn hàng thành công.' });
   }
 
-  return res.status(400).json({ message: 'Đơn hàng không thể hủy do đã thanh toán hoặc đã hủy trước đó.' });
+  return res.json({ success: true, message: 'Đã hủy đơn hàng thành công.' });
 });
 
 // ==========================================
