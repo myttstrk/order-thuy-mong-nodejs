@@ -19,6 +19,54 @@ const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
 const ITEMS_FILE = path.join(DATA_DIR, 'items.json');
 const BUNDLED_ITEMS_FILE = path.join(__dirname, 'data', 'items.json');
 
+// ==========================================
+// CƠ CHẾ CHỐNG SPAM (ANTI-SPAM IN-MEMORY)
+// ==========================================
+const ipRateLimitMap = new Map();
+const IP_WINDOW_MS = 10 * 60 * 1000; // 10 phút
+const MAX_ORDERS_PER_IP = 5;          // Tối đa 5 đơn / IP / 10 phút
+const MAX_PENDING_PER_USER = 2;       // Tối đa 2 đơn "Chờ thanh toán" trên cùng SĐT/Email
+const ORDER_EXPIRY_MS = 15 * 60 * 1000; // Đơn chờ thanh toán quá 15 phút tính là hết hạn
+
+// Dọn dẹp cache rate limit định kỳ tránh leak RAM
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, data] of ipRateLimitMap.entries()) {
+    if (now - data.firstRequest > IP_WINDOW_MS) {
+      ipRateLimitMap.delete(ip);
+    }
+  }
+}, 5 * 60 * 1000);
+
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || req.ip || '127.0.0.1';
+}
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const record = ipRateLimitMap.get(ip);
+  if (!record) {
+    ipRateLimitMap.set(ip, { count: 1, firstRequest: now });
+    return true;
+  }
+  if (now - record.firstRequest > IP_WINDOW_MS) {
+    ipRateLimitMap.set(ip, { count: 1, firstRequest: now });
+    return true;
+  }
+  if (record.count >= MAX_ORDERS_PER_IP) {
+    return false;
+  }
+  record.count += 1;
+  return true;
+}
+
+// ==========================================
+// ĐỌC / GHI DỮ LIỆU LOCAL
+// ==========================================
 function readItems() {
   try {
     if (fs.existsSync(ITEMS_FILE)) {
@@ -45,7 +93,6 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Khởi tạo orders.json
 if (!fs.existsSync(ORDERS_FILE)) {
   if (fs.existsSync(BUNDLED_ORDERS_FILE)) {
     try {
@@ -58,7 +105,6 @@ if (!fs.existsSync(ORDERS_FILE)) {
   }
 }
 
-// Khởi tạo items.json
 if (!fs.existsSync(ITEMS_FILE)) {
   if (fs.existsSync(BUNDLED_ITEMS_FILE)) {
     try {
@@ -104,6 +150,9 @@ function saveOrder(order) {
   return order;
 }
 
+// ==========================================
+// SUPABASE DATABASE LOGIC
+// ==========================================
 const supabaseEnabled = Boolean((process.env.SUPABASE_URL || '').trim() && (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim());
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -147,7 +196,7 @@ async function readOrdersPersistent(timeoutMs = 2500) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/orders?select=order_data&order=created_at.desc&limit=50`, {
+    const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/orders?select=order_data&order=created_at.desc&limit=60`, {
       headers: {
         apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
         Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
@@ -225,6 +274,7 @@ function getOrderSummary(orders) {
   };
 }
 
+// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/assets', express.static(path.join(__dirname, 'public')));
@@ -300,37 +350,7 @@ function decodeQrPayload(rawValue) {
   if (!rawValue || typeof rawValue !== 'string') return null;
   const parts = rawValue.split('|');
   if (parts.length < 2 || parts[0] !== 'THUY_MONG') return null;
-  return parts[1]; // Trả về orderCode
-}
-
-function verifySePaySignature(body, signature, authHeader) {
-  const expectedKey = process.env.SEPAY_WEBHOOK_API_KEY || process.env.SEPAY_WEBHOOK_SECRET;
-  if (!expectedKey) return true;
-
-  // 1. Kiểm tra qua Header Authorization: Apikey <KEY>
-  if (authHeader) {
-    const cleanHeader = authHeader.replace(/^Apikey\s+/i, '').trim();
-    if (cleanHeader === expectedKey) return true;
-  }
-
-  // 2. Kiểm tra HMAC SHA256 Signature nếu có gửi x-signature
-  if (signature) {
-    const normalized = body && typeof body === 'object' ? body : {};
-    const variants = [];
-    if (normalized.data && typeof normalized.data === 'object') {
-      variants.push(JSON.stringify(normalized.data));
-    }
-    variants.push(JSON.stringify(normalized));
-    variants.push(JSON.stringify({ ...normalized, data: undefined }));
-
-    const matched = variants
-      .map((value) => crypto.createHmac('sha256', expectedKey).update(value).digest('hex'))
-      .includes(String(signature).trim());
-
-    if (matched) return true;
-  }
-
-  return false;
+  return parts[1];
 }
 
 function resolveResendRecipient(email) {
@@ -440,11 +460,8 @@ async function sendGmailSmtpEmail(order) {
 }
 
 async function sendResendEmail(order) {
-  // Ưu tiên gửi qua Gmail SMTP nếu được cấu hình
   const gmailResult = await sendGmailSmtpEmail(order);
-  if (gmailResult) {
-    return gmailResult;
-  }
+  if (gmailResult) return gmailResult;
 
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -467,8 +484,6 @@ async function sendResendEmail(order) {
       <p><strong>Tổng tiền:</strong> ${new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(order.total)}</p>
       <p><strong>Thời gian:</strong> ${process.env.EVENT_CHECKIN_TEXT || '17:30 - 19:35 — 17/10/2026'}</p>
       <p><strong>Địa điểm:</strong> ${process.env.EVENT_VENUE || '361 Trường Chinh, Thanh Xuân, Hà Nội'}</p>
-      <p><strong>QR Check-in:</strong></p>
-      <img src="cid:thuy-mong-checkin-qr" alt="QR Check-in" style="width: 180px; height: 180px;" />
     `
   };
 
@@ -539,6 +554,10 @@ async function getInventory() {
   inventoryCacheTime = now;
   return inventoryCache;
 }
+
+// ==========================================
+// ROUTES
+// ==========================================
 
 app.get('/api/config', async (req, res) => {
   const allItems = readItems();
@@ -626,14 +645,31 @@ app.get('/api/captcha', (req, res) => {
   res.json({ token: hash, image: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}` });
 });
 
+// ==========================================
+// TẠO ĐƠN HÀNG (CÓ CHỐNG SPAM TOÀN DIỆN)
+// ==========================================
 app.post('/api/orders', async (req, res) => {
+  // 1. Chống Spam: Bẫy Honeypot (Nếu bot điền vào trường ẩn này, chặn ngay)
+  if (req.body?.website || req.body?.address_confirm) {
+    console.warn('[SPAM BOT TRAPPED] Phát hiện bot điền honeypot field.');
+    return res.status(400).json({ message: 'Yêu cầu không hợp lệ.' });
+  }
+
+  // 2. Chống Spam: Rate Limit IP
+  const clientIp = getClientIp(req);
+  if (!checkRateLimit(clientIp)) {
+    return res.status(429).json({
+      message: 'Bạn đang thao tác quá nhanh. Vui lòng đợi vài phút trước khi đặt thêm đơn mới.'
+    });
+  }
+
   const { customer, cart, paymentMethod, captcha } = req.body || {};
 
   if (!customer || !cart || !Array.isArray(cart.items) || !customer.name || !customer.phone) {
     return res.status(400).json({ message: 'Thiếu thông tin khách hàng hoặc giỏ hàng.' });
   }
 
-  // Bỏ qua xác thực Captcha nếu bật SKIP_CAPTCHA
+  // Xác thực Captcha
   const skipCaptcha = String(process.env.SKIP_CAPTCHA).toLowerCase() === 'true';
   if (!skipCaptcha) {
     if (!captcha || !captcha.token || !captcha.answer) {
@@ -641,7 +677,7 @@ app.post('/api/orders', async (req, res) => {
     }
 
     const secret = process.env.CAPTCHA_SECRET || 'f2e0625d9c22231ef2d0966bc08bf9b980ac905734ddcc738eed02ea06f51188';
-    const expectedHash = crypto.createHmac('sha256', secret).update(captcha.answer.toUpperCase()).digest('hex');
+    const expectedHash = crypto.createHmac('sha256', secret).update(String(captcha.answer).trim().toUpperCase()).digest('hex');
 
     if (expectedHash !== captcha.token) {
       return res.status(400).json({ message: 'Mã bảo vệ không chính xác.' });
@@ -651,14 +687,14 @@ app.post('/api/orders', async (req, res) => {
   const normalizedCustomer = {
     name: String(customer.name || '').trim(),
     phone: String(customer.phone || '').trim(),
-    email: String(customer.email || '').trim()
+    email: String(customer.email || '').trim().toLowerCase()
   };
 
   if (!normalizedCustomer.name || !normalizedCustomer.phone || !normalizedCustomer.email) {
     return res.status(400).json({ message: 'Vui lòng nhập đầy đủ họ tên, số điện thoại và email.' });
   }
 
-  // Kiểm tra tên miền email (MX Record)
+  // Kiểm tra định dạng và MX Record Email
   const emailParts = normalizedCustomer.email.split('@');
   if (emailParts.length !== 2) {
     return res.status(400).json({ message: 'Địa chỉ email không đúng định dạng.' });
@@ -670,7 +706,7 @@ app.post('/api/orders', async (req, res) => {
       return res.status(400).json({ message: 'Tên miền email này không có máy chủ nhận thư.' });
     }
   } catch (error) {
-    return res.status(400).json({ message: 'Tên miền email không tồn tại hoặc không hợp lệ.' });
+    return res.status(400).json({ message: 'Tên miền email không tồn tại hoặc không thể nhận thư.' });
   }
 
   if (normalizedCustomer.name.length < 2) {
@@ -681,6 +717,24 @@ app.post('/api/orders', async (req, res) => {
   const vnPhoneRegex = /^0(3|5|7|8|9)[0-9]{8}$/;
   if (!vnPhoneRegex.test(cleanPhone)) {
     return res.status(400).json({ message: 'Số điện thoại không hợp lệ. Vui lòng nhập số điện thoại Việt Nam thực tế.' });
+  }
+
+  // 3. Chống Spam: Giới hạn đơn "Chờ thanh toán" đang treo trên cùng SĐT/Email
+  const recentOrders = await readOrdersPersistent(1500);
+  const currentTime = Date.now();
+
+  const activePendingCount = recentOrders.filter((o) => {
+    if (o.status !== 'Chờ thanh toán') return false;
+    const samePhone = (o.customer?.phone || '').replace(/\D/g, '') === cleanPhone;
+    const sameEmail = String(o.customer?.email || '').trim().toLowerCase() === normalizedCustomer.email;
+    const isNotExpired = (currentTime - new Date(o.createdAt).getTime()) < ORDER_EXPIRY_MS;
+    return (samePhone || sameEmail) && isNotExpired;
+  }).length;
+
+  if (activePendingCount >= MAX_PENDING_PER_USER) {
+    return res.status(429).json({
+      message: `Bạn đang có ${activePendingCount} đơn hàng đang chờ thanh toán. Vui lòng hoàn tất thanh toán hoặc chờ 15 phút trước khi tạo đơn tiếp theo.`
+    });
   }
 
   const items = cart.items.map((item) => ({
@@ -717,7 +771,7 @@ app.post('/api/orders', async (req, res) => {
     itemsStr,
     total,
     status: 'Chờ thanh toán',
-    ticketStatus: 'Chưa sử dụng',
+    ticketStatus: 'Chưa thanh toán',
     createdAt: now,
     qrCodeUrl: null,
     emailSent: false,
@@ -728,32 +782,31 @@ app.post('/api/orders', async (req, res) => {
 
   const payment = createBankPayment(order);
 
+  // Lưu đơn vào Database / Bộ nhớ
   await saveOrderPersistent(order);
   inventoryCacheTime = 0;
 
-  // Ghi đơn ban đầu vào Google Sheet
+  // Ghi đơn vào Google Sheet (Gửi ngầm không chặn luồng phản hồi)
   const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
   if (sheetWebhookUrl) {
-    try {
-      await fetchWithTimeout(sheetWebhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'CREATE_ORDER',
-          createdAt: order.createdAt,
-          orderCode: order.orderCode,
-          customerName: order.customer.name,
-          customerPhone: order.customer.phone,
-          customerEmail: order.customer.email,
-          deliveryLocation: order.deliveryLocation,
-          status: order.status,
-          items: order.itemsStr,
-          total: order.total
-        })
-      }, 7000);
-    } catch (err) {
+    fetchWithTimeout(sheetWebhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'CREATE_ORDER',
+        createdAt: order.createdAt,
+        orderCode: order.orderCode,
+        customerName: order.customer.name,
+        customerPhone: order.customer.phone,
+        customerEmail: order.customer.email,
+        deliveryLocation: order.deliveryLocation,
+        status: order.status,
+        items: order.itemsStr,
+        total: order.total
+      })
+    }, 5000).catch((err) => {
       console.warn('Lỗi gửi dữ liệu tạo đơn về Sheet:', err.message);
-    }
+    });
   }
 
   res.status(201).json({
@@ -791,14 +844,12 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
   });
 });
 
-
-
-
-// Hỗ trợ cả 2 đường dẫn để không bao giờ bị 404 trên Vercel
+// ==========================================
+// SEPAY WEBHOOK (XÁC NHẬN TIỀN VÀO)
+// ==========================================
 const webhookPaths = ['/api/sepay-webhook', '/sepay-webhook'];
 
 app.all(webhookPaths, async (req, res) => {
-  // Cho phép SePay test hoặc ping qua GET
   if (req.method === 'GET') {
     return res.status(200).json({
       success: true,
@@ -814,18 +865,15 @@ app.all(webhookPaths, async (req, res) => {
     const payload = req.body || {};
     const transaction = (payload.data && typeof payload.data === 'object' ? payload.data : payload) || {};
 
-    // 1. Phản hồi test từ SePay
     if (payload.test === true || transaction.test === true) {
       return res.status(200).json({ success: true, message: 'Webhook test verified.' });
     }
 
-    // 2. Chỉ xử lý tiền vào (in)
     const transferType = String(transaction.transferType || payload.transferType || 'in').toLowerCase();
     if (transferType !== 'in') {
       return res.status(200).json({ success: true, message: 'Bỏ qua giao dịch ra' });
     }
 
-    // 3. Trích xuất và chuẩn hóa nội dung chuyển khoản
     const rawContent = [
       transaction.content,
       transaction.description,
@@ -848,7 +896,6 @@ app.all(webhookPaths, async (req, res) => {
     const rawAmount = transaction.transferAmount ?? transaction.amount ?? payload.amount ?? 0;
     const amount = Number(rawAmount || 0);
 
-    // 4. Tìm đơn hàng (so khớp mã bỏ dấu gạch ngang)
     const existingOrders = await readOrdersPersistent();
     let order = existingOrders.find((entry) => {
       const cleanDbCode = String(entry.orderCode || entry.order_code || '').replace(/[\s\-_]/g, '').toUpperCase();
@@ -856,7 +903,6 @@ app.all(webhookPaths, async (req, res) => {
     });
 
     if (!order) {
-      // Fallback query trực tiếp Supabase nếu chưa thấy trong cache
       const remoteOrder = await findOrderPersistent(extractedCleanCode);
       if (remoteOrder) {
         order = remoteOrder;
@@ -870,24 +916,21 @@ app.all(webhookPaths, async (req, res) => {
       });
     }
 
-    // Kiểm tra số tiền
     if (Number(order.total) > 0 && amount < Number(order.total)) {
       return res.status(200).json({ message: 'Số tiền thanh toán chưa đủ với giá trị đơn hàng.', order });
     }
 
-    // Đã thanh toán trước đó
     if (order.status === 'Đã thanh toán' && order.emailSent) {
       return res.status(200).json({ message: 'Đơn hàng đã được xác nhận từ trước.', order });
     }
 
-    // 5. Cập nhật trạng thái đơn
     const now = new Date().toISOString();
     order.status = 'Đã thanh toán';
     order.ticketStatus = 'Chưa sử dụng';
     order.paidAt = order.paidAt || now;
     order.qrCodeUrl = order.qrCodeUrl || createQrCodeUrl(order);
 
-    // 6. Gửi Email vé và QR Check-in
+    // Gửi email vé
     try {
       const emailResult = await sendResendEmail(order);
       order.emailSent = !emailResult.skipped;
@@ -899,17 +942,12 @@ app.all(webhookPaths, async (req, res) => {
       console.error('Lỗi gửi email:', mailErr.message);
     }
 
-    // 7. Lưu lại vào Supabase (cả order_data và các cột độc lập)
     await saveOrderPersistent(order);
     inventoryCacheTime = 0;
 
-    // 8. Đồng bộ Google Sheet
+    // Cập nhật Google Sheet
     const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
-    if (!sheetWebhookUrl) {
-      console.warn('[SHEET WEBHOOK] Chưa cấu hình GOOGLE_SHEET_WEBHOOK_URL trong biến môi trường!');
-    } else {
-      console.log('[SHEET WEBHOOK] Bắt đầu gọi sang Google Sheet với URL:', sheetWebhookUrl);
-
+    if (sheetWebhookUrl) {
       try {
         await fetchWithTimeout(sheetWebhookUrl, {
           method: 'POST',
@@ -929,9 +967,8 @@ app.all(webhookPaths, async (req, res) => {
           })
         }, 7000);
       } catch (sheetErr) {
-        console.warn('Lỗi gửi dữ liệu xác nhận thanh toán về Sheet:', sheetErr.message);
+        console.warn('Lỗi gửi xác nhận thanh toán sang Google Sheet:', sheetErr.message);
       }
-
     }
 
     return res.status(200).json({
@@ -946,8 +983,9 @@ app.all(webhookPaths, async (req, res) => {
   }
 });
 
-
-
+// ==========================================
+// ADMIN CHECK-IN
+// ==========================================
 app.post('/api/admin/checkin', async (req, res) => {
   const { qrCode } = req.body || {};
   if (!qrCode) {
@@ -962,8 +1000,8 @@ app.post('/api/admin/checkin', async (req, res) => {
   let order = await findOrderPersistent(orderCode);
   if (!order) {
     const allOrders = await readOrdersPersistent(5000);
-    order = allOrders.find(o => 
-      o.orderCode === orderCode || 
+    order = allOrders.find(o =>
+      o.orderCode === orderCode ||
       o.orderCode.replace(/[\s\-_]/g, '') === orderCode.replace(/[\s\-_]/g, '')
     );
   }
@@ -977,8 +1015,8 @@ app.post('/api/admin/checkin', async (req, res) => {
   }
 
   if (order.ticketStatus === 'Đã sử dụng') {
-    const timeText = order.checkedInAt 
-      ? new Date(order.checkedInAt).toLocaleTimeString('vi-VN') 
+    const timeText = order.checkedInAt
+      ? new Date(order.checkedInAt).toLocaleTimeString('vi-VN')
       : 'trước đó';
     return res.status(409).json({
       message: `Vé này đã được check-in lúc ${timeText}!`,
@@ -986,17 +1024,14 @@ app.post('/api/admin/checkin', async (req, res) => {
     });
   }
 
-  // Cập nhật trạng thái vé và lưu vào database
   order.ticketStatus = 'Đã sử dụng';
   order.checkedInAt = new Date().toISOString();
   await saveOrderPersistent(order);
 
-  // Đồng bộ trạng thái check-in sang Google Sheet
   const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
   if (sheetWebhookUrl) {
     try {
-      console.log('[CHECKIN] Đang gửi dữ liệu check-in sang Google Sheet...');
-      const sheetRes = await fetchWithTimeout(sheetWebhookUrl, {
+      await fetchWithTimeout(sheetWebhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1009,9 +1044,6 @@ app.post('/api/admin/checkin', async (req, res) => {
           items: order.itemsStr || (order.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', ')
         })
       }, 7000);
-
-      const sheetText = await sheetRes.text();
-      console.log(`[CHECKIN] Google Sheet phản hồi (Status: ${sheetRes.status}):`, sheetText);
     } catch (sheetErr) {
       console.error('[CHECKIN ERROR] Lỗi đồng bộ check-in sang Google Sheet:', sheetErr.message);
     }
@@ -1029,132 +1061,129 @@ app.post('/api/admin/checkin', async (req, res) => {
     }
   });
 });
-  // Middleware kiểm tra token hoặc basic session của Admin
-  function requireAdminAuth(req, res, next) {
-    const authHeader = req.headers['authorization'] || '';
-    const expectedToken = Buffer.from(
-      `${process.env.ADMIN_USERNAME || 'admin'}:${process.env.ADMIN_PASSWORD || 'admin123'}`
-    ).toString('base64');
 
-    if (authHeader === `Basic ${expectedToken}` || req.headers['x-admin-token'] === expectedToken) {
-      return next();
-    }
-    return res.status(401).json({ message: 'Bạn chưa đăng nhập hoặc phiên làm việc đã hết hạn.' });
+function requireAdminAuth(req, res, next) {
+  const authHeader = req.headers['authorization'] || '';
+  const expectedToken = Buffer.from(
+    `${process.env.ADMIN_USERNAME || 'admin'}:${process.env.ADMIN_PASSWORD || 'admin123'}`
+  ).toString('base64');
+
+  if (authHeader === `Basic ${expectedToken}` || req.headers['x-admin-token'] === expectedToken) {
+    return next();
+  }
+  return res.status(401).json({ message: 'Bạn chưa đăng nhập hoặc phiên làm việc đã hết hạn.' });
+}
+
+app.post('/api/admin/login', (req, res) => {
+  const { username, password } = req.body || {};
+  const expectedUser = process.env.ADMIN_USERNAME || 'admin';
+  const expectedPass = process.env.ADMIN_PASSWORD || 'admin123';
+
+  if (username === expectedUser && password === expectedPass) {
+    const token = Buffer.from(`${expectedUser}:${expectedPass}`).toString('base64');
+    return res.json({ success: true, token });
   }
 
-  // API đăng nhập admin
-  app.post('/api/admin/login', (req, res) => {
-    const { username, password } = req.body || {};
-    const expectedUser = process.env.ADMIN_USERNAME || 'admin';
-    const expectedPass = process.env.ADMIN_PASSWORD || 'admin123';
+  return res.status(401).json({ success: false, message: 'Sai tên đăng nhập hoặc mật khẩu.' });
+});
 
-    if (username === expectedUser && password === expectedPass) {
-      const token = Buffer.from(`${expectedUser}:${expectedPass}`).toString('base64');
-      return res.json({ success: true, token });
+app.get('/api/admin/items', async (req, res) => {
+  const items = readItems();
+  const soldQuantities = await getInventory();
+
+  const updatedItems = items.map(item => {
+    if (item.baseQuantity !== undefined) {
+      const sold = soldQuantities[item.id] || 0;
+      item.quantity = Math.max(0, item.baseQuantity - sold);
     }
-
-    return res.status(401).json({ success: false, message: 'Sai tên đăng nhập hoặc mật khẩu.' });
-  });
-  // Quản lý mặt hàng
-  app.get('/api/admin/items', async (req, res) => {
-    const items = readItems();
-    const soldQuantities = await getInventory();
-
-    const updatedItems = items.map(item => {
-      if (item.baseQuantity !== undefined) {
-        const sold = soldQuantities[item.id] || 0;
-        item.quantity = Math.max(0, item.baseQuantity - sold);
-      }
-      return item;
-    });
-
-    res.json(updatedItems);
-  });
-  app.get('/api/admin/checkin-history', requireAdminAuth, async (req, res) => {
-    try {
-      const allOrders = await readOrdersPersistent(5000);
-      const scannedOrders = allOrders
-        .filter((o) => o.ticketStatus === 'Đã sử dụng' && o.checkedInAt)
-        .sort((a, b) => new Date(b.checkedInAt) - new Date(a.checkedInAt))
-        .map((o) => ({
-          orderCode: o.orderCode,
-          customerName: o.customer?.name || 'Khách',
-          customerPhone: o.customer?.phone || '',
-          customerEmail: o.customer?.email || '',
-          itemsStr: o.itemsStr || (o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', '),
-          total: o.total,
-          checkedInAt: o.checkedInAt
-        }));
-
-      return res.json({ success: true, count: scannedOrders.length, data: scannedOrders });
-    } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
-    }
-  });
-  app.post('/api/admin/items', async (req, res) => {
-    const newItem = req.body;
-    if (!newItem || !newItem.id || !newItem.name) {
-      return res.status(400).json({ error: 'Thiếu thông tin bắt buộc (id, name).' });
-    }
-
-    let items = readItems();
-    const index = items.findIndex(i => i.id === newItem.id);
-    const soldQuantities = await getInventory();
-    const sold = soldQuantities[newItem.id] || 0;
-
-    if (index !== -1) {
-      if (newItem.quantity !== undefined) {
-        newItem.baseQuantity = Number(newItem.quantity) + sold;
-        delete newItem.quantity;
-      }
-      items[index] = { ...items[index], ...newItem };
-    } else {
-      if (newItem.quantity !== undefined) {
-        newItem.baseQuantity = Number(newItem.quantity) + sold;
-        delete newItem.quantity;
-      }
-      items.push(newItem);
-    }
-
-    if (saveItems(items)) {
-      res.json({ success: true, item: items[index !== -1 ? index : items.length - 1] });
-    } else {
-      res.status(500).json({ error: 'Không thể lưu mặt hàng.' });
-    }
+    return item;
   });
 
-  app.get(['/admin', '/api/admin'], (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-  });
+  res.json(updatedItems);
+});
 
-  app.get(['/contact', '/api/contact'], (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'contact.html'));
-  });
+app.get('/api/admin/checkin-history', requireAdminAuth, async (req, res) => {
+  try {
+    const allOrders = await readOrdersPersistent(5000);
+    const scannedOrders = allOrders
+      .filter((o) => o.ticketStatus === 'Đã sử dụng' && o.checkedInAt)
+      .sort((a, b) => new Date(b.checkedInAt) - new Date(a.checkedInAt))
+      .map((o) => ({
+        orderCode: o.orderCode,
+        customerName: o.customer?.name || 'Khách',
+        customerPhone: o.customer?.phone || '',
+        customerEmail: o.customer?.email || '',
+        itemsStr: o.itemsStr || (o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', '),
+        total: o.total,
+        checkedInAt: o.checkedInAt
+      }));
 
-  app.use(express.static(path.join(__dirname, 'public')));
+    return res.json({ success: true, count: scannedOrders.length, data: scannedOrders });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
-  // app.get('*', (req, res) => {
-  //   res.sendFile(path.join(__dirname, 'public', 'index.html'));
-  // });
-
-  function startServer(port = PORT) {
-    return app.listen(port, () => {
-      console.log(`Thủy Mộng app is running at http://localhost:${port}`);
-    });
+app.post('/api/admin/items', async (req, res) => {
+  const newItem = req.body;
+  if (!newItem || !newItem.id || !newItem.name) {
+    return res.status(400).json({ error: 'Thiếu thông tin bắt buộc (id, name).' });
   }
 
-  if (require.main === module) {
-    startServer();
+  let items = readItems();
+  const index = items.findIndex(i => i.id === newItem.id);
+  const soldQuantities = await getInventory();
+  const sold = soldQuantities[newItem.id] || 0;
+
+  if (index !== -1) {
+    if (newItem.quantity !== undefined) {
+      newItem.baseQuantity = Number(newItem.quantity) + sold;
+      delete newItem.quantity;
+    }
+    items[index] = { ...items[index], ...newItem };
+  } else {
+    if (newItem.quantity !== undefined) {
+      newItem.baseQuantity = Number(newItem.quantity) + sold;
+      delete newItem.quantity;
+    }
+    items.push(newItem);
   }
 
-  module.exports = {
-    app,
-    startServer,
-    readOrders,
-    findOrderByCode,
-    saveOrder,
-    createQrCodeUrl,
-    sendResendEmail,
-    decodeQrPayload,
-    getOrderSummary
-  };
+  if (saveItems(items)) {
+    res.json({ success: true, item: items[index !== -1 ? index : items.length - 1] });
+  } else {
+    res.status(500).json({ error: 'Không thể lưu mặt hàng.' });
+  }
+});
+
+app.get(['/admin', '/api/admin'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+
+app.get(['/contact', '/api/contact'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'contact.html'));
+});
+
+app.use(express.static(path.join(__dirname, 'public')));
+
+function startServer(port = PORT) {
+  return app.listen(port, () => {
+    console.log(`Thủy Mộng app is running at http://localhost:${port}`);
+  });
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = {
+  app,
+  startServer,
+  readOrders,
+  findOrderByCode,
+  saveOrder,
+  createQrCodeUrl,
+  sendResendEmail,
+  decodeQrPayload,
+  getOrderSummary
+};
