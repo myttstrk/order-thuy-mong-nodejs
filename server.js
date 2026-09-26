@@ -88,6 +88,42 @@ function saveItems(items) {
   }
 }
 
+async function readItemsPersistent() {
+  const localItems = readItems();
+  if (!supabaseEnabled) return localItems;
+
+  try {
+    const rows = await supabaseRequest('items?select=item_data&order=updated_at.desc');
+    const remoteItems = Array.isArray(rows) ? rows.map((row) => row.item_data).filter(Boolean) : [];
+    return remoteItems.length ? remoteItems : localItems;
+  } catch (error) {
+    console.warn('Supabase items read failed, falling back to local file store:', error.message);
+    return localItems;
+  }
+}
+
+async function saveItemsPersistent(items) {
+  const localSaved = saveItems(items);
+  if (!supabaseEnabled) return localSaved;
+
+  try {
+    const normalizedItems = Array.isArray(items) ? items : [];
+    await Promise.all(normalizedItems.map((item) => supabaseRequest('items?on_conflict=item_id', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({
+        item_id: String(item.id || ''),
+        item_data: item,
+        updated_at: new Date().toISOString()
+      })
+    })));
+    return true;
+  } catch (error) {
+    console.warn('Supabase items save failed, falling back to local file store:', error.message);
+    return localSaved;
+  }
+}
+
 const BUNDLED_ORDERS_FILE = path.join(__dirname, 'data', 'orders.json');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -560,7 +596,7 @@ async function getInventory() {
 // ==========================================
 
 app.get('/api/config', async (req, res) => {
-  const allItems = readItems();
+  const allItems = await readItemsPersistent();
   const soldQuantities = await getInventory();
 
   const ticketTypes = allItems.filter(i => i.type === 'ticket').map(ticket => {
@@ -719,52 +755,50 @@ app.post('/api/orders', async (req, res) => {
     return res.status(400).json({ message: 'Số điện thoại không hợp lệ. Vui lòng nhập số điện thoại Việt Nam thực tế.' });
   }
 
-  // 3. Chống Spam: Tìm đơn "Chờ thanh toán" còn hiệu lực (< 15 phút) của người dùng này
+  // 3. Chống Spam: Tìm đơn "Chờ thanh toán" MỚI NHẤT còn hiệu lực (< 15 phút) của người dùng này
   const currentTime = Date.now();
   const fifteenMinutesAgo = new Date(currentTime - ORDER_EXPIRY_MS).toISOString();
-  let existingPendingOrder = null;
+  let matchedPendingOrders = [];
 
+  // A. Truy vấn từ Supabase
   if (supabaseEnabled) {
     try {
       const pendingRows = await supabaseRequest(
-        `orders?order_data->>status=eq.Chờ thanh toán&created_at=gte.${encodeURIComponent(fifteenMinutesAgo)}&select=order_data&order=created_at.desc&limit=50`
+        `orders?order_data->>status=eq.Chờ thanh toán&created_at=gte.${encodeURIComponent(fifteenMinutesAgo)}&select=order_data`
       );
 
       if (Array.isArray(pendingRows)) {
-        for (const r of pendingRows) {
-          const o = r.order_data;
-          if (!o || !o.customer) continue;
-          const phoneMatch = String(o.customer.phone || '').replace(/\D/g, '') === cleanPhone;
-          const emailMatch = String(o.customer.email || '').toLowerCase().trim() === normalizedCustomer.email;
-          if (phoneMatch || emailMatch) {
-            existingPendingOrder = o;
-            break;
-          }
-        }
+        matchedPendingOrders = pendingRows
+          .map((r) => r.order_data)
+          .filter((o) => {
+            if (!o || !o.customer) return false;
+            const phoneMatch = String(o.customer.phone || '').replace(/\D/g, '') === cleanPhone;
+            const emailMatch = String(o.customer.email || '').toLowerCase().trim() === normalizedCustomer.email;
+            return (phoneMatch || emailMatch);
+          });
       }
     } catch (err) {
       console.warn('Lỗi kiểm tra pending orders trên Supabase:', err.message);
     }
   }
 
-  // Fallback kiểm tra trong orders local nếu Supabase không tìm thấy
-  if (!existingPendingOrder) {
+  // B. Fallback kiểm tra thêm trong cache local
+  if (matchedPendingOrders.length === 0) {
     const localOrders = readOrders();
-    for (let i = localOrders.length - 1; i >= 0; i--) {
-      const o = localOrders[i];
-      if (o.status !== 'Chờ thanh toán') continue;
+    matchedPendingOrders = localOrders.filter((o) => {
+      if (o.status !== 'Chờ thanh toán') return false;
       const phoneMatch = String(o.customer?.phone || '').replace(/\D/g, '') === cleanPhone;
       const emailMatch = String(o.customer?.email || '').toLowerCase().trim() === normalizedCustomer.email;
       const isNotExpired = (currentTime - new Date(o.createdAt).getTime()) < ORDER_EXPIRY_MS;
-      if ((phoneMatch || emailMatch) && isNotExpired) {
-        existingPendingOrder = o;
-        break;
-      }
-    }
+      return (phoneMatch || emailMatch) && isNotExpired;
+    });
   }
 
-  // NẾU ĐÃ CÓ ĐƠN CHỜ THANH TOÁN -> DẪN VỀ MÃ QR ĐƠN CŨ NGAY (TIẾT KIỆM TÀI NGUYÊN VERCEL & TRÁNH SPAM)
-  
+  // C. SẮP XẾP MỚI NHẤT LÊN ĐẦU VÀ LẤY ĐƠN ĐẦU TIÊN
+  matchedPendingOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const existingPendingOrder = matchedPendingOrders[0] || null;
+
+  // NẾU ĐÃ CÓ ĐƠN CHỜ THANH TOÁN -> DẪN VỀ MÃ QR ĐƠN MỚI NHẤT
   if (existingPendingOrder) {
     const existingPayment = createBankPayment(existingPendingOrder);
     const existingExpiresAt = new Date(new Date(existingPendingOrder.createdAt).getTime() + ORDER_EXPIRY_MS).toISOString();
@@ -873,7 +907,16 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
     return res.status(404).json({ message: 'Không tìm thấy đơn hàng.' });
   }
 
-  // Tự động sinh thông tin thanh toán chuẩn từ env trên server
+  const createdAtMs = new Date(order.createdAt).getTime();
+  const expiresAtMs = createdAtMs + ORDER_EXPIRY_MS;
+  const isExpired = Date.now() > expiresAtMs;
+
+  // Nếu đơn đang 'Chờ thanh toán' mà đã quá 15 phút -> Chuyển thành Đã hết hạn
+  if (order.status === 'Chờ thanh toán' && isExpired) {
+    order.status = 'Đã hết hạn';
+    await saveOrderPersistent(order);
+  }
+
   const payment = createBankPayment(order);
 
   return res.json({
@@ -889,13 +932,12 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
       paidAt: order.paidAt || null,
       checkedInAt: order.checkedInAt || null,
       createdAt: order.createdAt,
-      expiresAt: order.expiresAt || new Date(new Date(order.createdAt).getTime() + ORDER_EXPIRY_MS).toISOString()
+      expiresAt: new Date(expiresAtMs).toISOString()
     },
-    payment 
+    payment
   });
 });
 
-// API Hủy đơn hàng đang chờ thanh toán (Giúp khách đặt lại đơn khác ngay lập tức)
 app.post('/api/orders/:orderCode/cancel', async (req, res) => {
   const { orderCode } = req.params;
   const order = await findOrderPersistent(orderCode);
@@ -906,20 +948,23 @@ app.post('/api/orders/:orderCode/cancel', async (req, res) => {
 
   if (order.status === 'Chờ thanh toán') {
     order.status = 'Đã hủy';
-    order.ticketStatus = 'Đã hủy';
-    order.cancelledAt = new Date().toISOString();
     await saveOrderPersistent(order);
     inventoryCacheTime = 0;
-    return res.json({
-      success: true,
-      message: 'Đã hủy đơn hàng thành công.',
-      order: {
-        orderCode: order.orderCode,
-        status: order.status,
-        ticketStatus: order.ticketStatus,
-        cancelledAt: order.cancelledAt
-      }
-    });
+
+    // Gửi tín hiệu sang Google Sheet để xóa hoặc đánh dấu hủy dòng này
+    const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
+    if (sheetWebhookUrl) {
+      fetchWithTimeout(sheetWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'CANCEL_ORDER',
+          orderCode: order.orderCode
+        })
+      }, 5000).catch(err => console.warn('Lỗi báo hủy sang Sheet:', err.message));
+    }
+
+    return res.json({ success: true, message: 'Đã hủy đơn hàng thành công.' });
   }
 
   return res.status(400).json({ message: 'Đơn hàng không thể hủy do đã thanh toán hoặc đã hủy trước đó.' });
@@ -1169,7 +1214,7 @@ app.post('/api/admin/login', (req, res) => {
 });
 
 app.get('/api/admin/items', async (req, res) => {
-  const items = readItems();
+  const items = await readItemsPersistent();
   const soldQuantities = await getInventory();
 
   const updatedItems = items.map(item => {
@@ -1211,7 +1256,7 @@ app.post('/api/admin/items', async (req, res) => {
     return res.status(400).json({ error: 'Thiếu thông tin bắt buộc (id, name).' });
   }
 
-  let items = readItems();
+  let items = await readItemsPersistent();
   const index = items.findIndex(i => i.id === newItem.id);
   const soldQuantities = await getInventory();
   const sold = soldQuantities[newItem.id] || 0;
@@ -1230,10 +1275,43 @@ app.post('/api/admin/items', async (req, res) => {
     items.push(newItem);
   }
 
-  if (saveItems(items)) {
+  if (await saveItemsPersistent(items)) {
     res.json({ success: true, item: items[index !== -1 ? index : items.length - 1] });
   } else {
     res.status(500).json({ error: 'Không thể lưu mặt hàng.' });
+  }
+});
+
+app.delete('/api/admin/items/:id', async (req, res) => {
+  const itemId = String(req.params.id || '').trim();
+  if (!itemId) {
+    return res.status(400).json({ error: 'Thiếu ID mặt hàng.' });
+  }
+
+  try {
+    let items = await readItemsPersistent();
+    const filtered = items.filter((item) => String(item.id) !== itemId);
+
+    if (filtered.length === items.length) {
+      return res.status(404).json({ error: 'Không tìm thấy mặt hàng để xóa.' });
+    }
+
+    const saved = await saveItemsPersistent(filtered);
+    if (!saved) {
+      return res.status(500).json({ error: 'Không thể xóa mặt hàng.' });
+    }
+
+    if (supabaseEnabled) {
+      try {
+        await supabaseRequest(`items?item_id=eq.${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+      } catch (error) {
+        console.warn('Supabase delete item failed:', error.message);
+      }
+    }
+
+    return res.json({ success: true, deletedId: itemId });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Không thể xóa mặt hàng.' });
   }
 });
 

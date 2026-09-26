@@ -113,7 +113,7 @@ function showPendingOrderRecoveryModal(order = null) {
   const text = document.getElementById('pending-order-text');
   const code = document.getElementById('pending-order-code');
   if (title) title.textContent = 'Bạn đang có đơn chờ thanh toán';
-  if (text) text.textContent = `Đơn ${orderCode} vẫn còn hiệu lực trong vòng ${expiry}. Bạn muốn tiếp tục thanh toán với đơn này hay hủy để tạo đơn mới?`;
+  if (text) text.textContent = `Đơn ${orderCode} giữ chỗ đến ${expiry}. Bạn muốn tiếp tục thanh toán hay hủy để tạo đơn mới?`;
   if (code) code.textContent = `Mã đơn: ${orderCode}`;
 
   modal.classList.remove('hidden');
@@ -133,15 +133,30 @@ async function restorePendingOrderFromStorage() {
   const stored = getStoredPendingOrder();
   if (!stored?.orderCode) return;
 
+  // 1. Kiểm tra nhanh ở LocalStorage: Nếu đã hết hạn từ trước -> xóa luôn
+  if (stored.expiresAt && new Date(stored.expiresAt).getTime() <= Date.now()) {
+    clearPendingOrder();
+    return;
+  }
+
   try {
     const response = await fetch(`/api/orders/${encodeURIComponent(stored.orderCode)}/status${stored.email ? `?email=${encodeURIComponent(stored.email)}` : ''}`);
     const result = await response.json();
 
-    if (!response.ok || !result.order || result.order.status !== 'Chờ thanh toán') {
+    if (!response.ok || !result.order) {
       clearPendingOrder();
       return;
     }
 
+    const expiresAtMs = new Date(result.order.expiresAt || stored.expiresAt).getTime();
+
+    // 2. Kiểm tra lại với thời gian chuẩn từ Server: Nếu đã hết hạn hoặc không còn Chờ thanh toán -> Xóa ngay
+    if (result.order.status !== 'Chờ thanh toán' || expiresAtMs <= Date.now()) {
+      clearPendingOrder();
+      return;
+    }
+
+    // Đơn thực sự còn hạn -> Mới hiện popup
     showPendingOrderRecoveryModal({
       orderCode: result.order.orderCode,
       email: stored.email || result.order.customer?.email || '',
@@ -152,7 +167,6 @@ async function restorePendingOrderFromStorage() {
     clearPendingOrder();
   }
 }
-
 async function continuePendingOrder(orderCode, email) {
   hidePendingOrderRecoveryModal();
   const paymentInfoEl = document.getElementById('payment-account-info');
