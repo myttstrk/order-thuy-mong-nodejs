@@ -187,6 +187,7 @@
           <td>${new Date(o.checkedInAt).toLocaleTimeString('vi-VN')} (${new Date(o.checkedInAt).toLocaleDateString('vi-VN')})</td>
           <td><strong>${o.orderCode}</strong></td>
           <td>${o.customerName} <br><small class="muted">${o.customerPhone}</small></td>
+          <small style="color: #0d6efd;">✉️ ${o.customerEmail || '—'}</small>
           <td>${o.itemsStr}</td>
           <td><span class="badge">Đã check-in</span></td>
         </tr>

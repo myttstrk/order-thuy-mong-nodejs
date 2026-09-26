@@ -1001,6 +1001,7 @@ app.post('/api/admin/checkin', async (req, res) => {
           checkedInAt: order.checkedInAt,
           ticketStatus: 'Đã sử dụng',
           customerName: order.customer?.name || '',
+          customerEmail: order.customer?.email || '',
           items: order.itemsStr || (order.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', ')
         })
       }, 7000);
@@ -1017,6 +1018,7 @@ app.post('/api/admin/checkin', async (req, res) => {
     order: {
       orderCode: order.orderCode,
       customerName: order.customer?.name,
+      customerEmail: order.customer?.email || '',
       itemsStr: order.itemsStr || (order.items || []).map(i => `${i.name} (x${i.quantity})`).join(', '),
       ticketStatus: order.ticketStatus,
       checkedInAt: order.checkedInAt
@@ -1074,6 +1076,7 @@ app.post('/api/admin/checkin', async (req, res) => {
           orderCode: o.orderCode,
           customerName: o.customer?.name || 'Khách',
           customerPhone: o.customer?.phone || '',
+          customerEmail: o.customer?.email || '',
           itemsStr: o.itemsStr || (o.items || []).map((i) => `${i.name} (x${i.quantity})`).join(', '),
           total: o.total,
           checkedInAt: o.checkedInAt
