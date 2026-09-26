@@ -526,8 +526,27 @@ small {
 }
 
 .payment-account-box {
+  margin-top: 22px;
+  padding: 18px 20px 22px;
   background: rgba(241, 198, 110, 0.08);
   border: 1px solid rgba(199, 157, 101, 0.2);
+  border-radius: 18px;
+}
+
+.payment-account-box h4 {
+  display: inline-block;
+  margin: 0 0 16px;
+  padding: 0.7rem 1.15rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f1c66b, #d9a85c);
+  color: #17110e;
+  font-size: clamp(1.1rem, 1.8vw, 2rem);
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.payment-account-box .payment-note {
+  margin-top: 14px;
 }
 
 .site-footer {

@@ -8,17 +8,22 @@
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f8; margin: 0; padding: 20px; color: #333; }
     .container { max-width: 900px; margin: 0 auto; }
-    .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); margin-bottom: 24px; }
+    .card { background: white; border-radius: 14px; padding: 20px; box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06); margin-bottom: 24px; }
     .hidden { display: none !important; }
-    
+
+    .page-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .page-title { margin: 0; color: #1d2630; }
+    .toolbar-button { background: #f5efe8; border: 1px solid #e4d3b6; color: #2d261f; padding: 8px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+    .toolbar-button.danger { background: #fff5f5; border-color: #f4caca; color: #8b2f2f; }
+
     /* Login Form */
     .login-box { max-width: 360px; margin: 80px auto; padding: 30px; text-align: center; }
-    .login-box input { width: 100%; padding: 12px; margin: 8px 0 16px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
-    .btn { background: #071a1d; color: #f1c66b; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; }
-    
+    .login-box input { width: 100%; padding: 12px; margin: 8px 0 16px; border: 1px solid #ddd; border-radius: 10px; box-sizing: border-box; background: #fff; }
+    .btn { background: #071a1d; color: #f1c66b; border: none; padding: 12px 24px; border-radius: 10px; cursor: pointer; font-weight: bold; width: 100%; }
+
     /* Checkin Scan */
-    #reader { width: 100%; max-width: 450px; margin: 0 auto; border-radius: 10px; overflow: hidden; }
-    #scan-result { margin-top: 15px; padding: 12px; border-radius: 8px; display: none; font-size: 15px; }
+    #reader { width: 100%; max-width: 450px; margin: 0 auto; border-radius: 12px; overflow: hidden; }
+    #scan-result { margin-top: 15px; padding: 12px; border-radius: 10px; display: none; font-size: 15px; }
     .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
 
@@ -26,7 +31,9 @@
     table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
     th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
     th { background: #fafafa; color: #666; font-weight: 600; }
-    .badge { background: #e8f5e9; color: #2e7d32; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+    .badge { background: #e8f5e9; color: #2e7d32; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: bold; }
+    .muted { color: #666; }
+    .empty { text-align: center; color: #999; }
   </style>
 </head>
 <body>
@@ -43,9 +50,9 @@
 
   <!-- MÀN HÌNH CHÍNH (SAU KHI ĐĂNG NHẬP) -->
   <div id="admin-dashboard" class="hidden">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <h2 style="margin: 0;">Soát Vé Vào Cửa</h2>
-      <button onclick="handleLogout()" style="background: none; border: 1px solid #ccc; padding: 6px 12px; border-radius: 6px; cursor: pointer;">Đăng xuất</button>
+    <div class="page-toolbar">
+      <h2 class="page-title">Soát Vé Vào Cửa</h2>
+      <button class="toolbar-button danger" onclick="handleLogout()">Đăng xuất</button>
     </div>
 
     <!-- KHU VỰC CAMERA SCAN -->
@@ -56,9 +63,9 @@
 
     <!-- KHU VỰC LỊCH SỬ QUÉT VÉ -->
     <div class="card">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h3 style="margin: 0;">Lịch Sử Đã Scan (<span id="scan-count">0</span>)</h3>
-        <button onclick="loadHistory()" style="background: #eee; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer;">Làm mới</button>
+      <div class="page-toolbar">
+        <h3 class="page-title" style="font-size: 1.2rem;">Lịch Sử Đã Scan (<span id="scan-count">0</span>)</h3>
+        <button class="toolbar-button" onclick="loadHistory()">Làm mới</button>
       </div>
 
       <div style="overflow-x: auto;">
@@ -73,7 +80,7 @@
             </tr>
           </thead>
           <tbody id="history-body">
-            <tr><td colspan="5" style="text-align: center; color: #999;">Chưa có lượt quét nào</td></tr>
+            <tr><td colspan="5" class="empty">Chưa có lượt quét nào</td></tr>
           </tbody>
         </table>
       </div>
@@ -179,7 +186,7 @@
         <tr>
           <td>${new Date(o.checkedInAt).toLocaleTimeString('vi-VN')} (${new Date(o.checkedInAt).toLocaleDateString('vi-VN')})</td>
           <td><strong>${o.orderCode}</strong></td>
-          <td>${o.customerName} <br><small style="color: #666;">${o.customerPhone}</small></td>
+          <td>${o.customerName} <br><small class="muted">${o.customerPhone}</small></td>
           <td>${o.itemsStr}</td>
           <td><span class="badge">Đã check-in</span></td>
         </tr>
