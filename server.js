@@ -953,29 +953,26 @@ app.post('/api/orders/:orderCode/cancel', async (req, res) => {
     return res.status(404).json({ message: 'Không tìm thấy đơn hàng.' });
   }
 
-  // Không được hủy đơn đã thanh toán thành công
   if (order.status === 'Đã thanh toán') {
     return res.status(400).json({ message: 'Đơn hàng đã thanh toán thành công, không thể hủy.' });
   }
 
-  // Cho phép hủy nếu đơn đang Chờ thanh toán, Đã hết hạn hoặc đã Đã hủy từ trước
-  if (order.status === 'Chờ thanh toán' || order.status === 'Đã hết hạn') {
-    order.status = 'Đã hủy';
-    await saveOrderPersistent(order);
-    inventoryCacheTime = 0;
+  // Cập nhật trạng thái 'Khách hủy' (không xóa dữ liệu để phục vụ lead chăm sóc)
+  order.status = 'Khách hủy';
+  await saveOrderPersistent(order);
+  inventoryCacheTime = 0;
 
-    // Gửi tín hiệu sang Google Sheet xóa dòng đơn
-    const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
-    if (sheetWebhookUrl) {
-      fetchWithTimeout(sheetWebhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'CANCEL_ORDER',
-          orderCode: order.orderCode
-        })
-      }, 5000).catch((err) => console.warn('Lỗi báo hủy sang Sheet:', err.message));
-    }
+  // Báo sang Sheet đổi màu xám và cập nhật cột G
+  const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
+  if (sheetWebhookUrl) {
+    fetchWithTimeout(sheetWebhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'CANCEL_ORDER',
+        orderCode: order.orderCode
+      })
+    }, 5000).catch((err) => console.warn('Lỗi báo hủy sang Sheet:', err.message));
   }
 
   return res.json({ success: true, message: 'Đã hủy đơn hàng thành công.' });

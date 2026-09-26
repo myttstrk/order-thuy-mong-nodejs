@@ -175,7 +175,6 @@
 
     /* Hiệu ứng rung lắc đỏ khi bị lỗi hoặc trùng vé */
     @keyframes errorShake {
-
       0%,
       100% {
         transform: translateX(0);
@@ -243,7 +242,6 @@
       pointer-events: auto;
     }
 
-    /* Modal Card */
     .modal-content {
       background: white;
       width: 90%;
@@ -301,10 +299,87 @@
     .modal-error .modal-title {
       color: #d32f2f;
     }
+
+    /* BREADCRUMB / TOAST NOTIFICATION CONTAINER */
+    #breadcrumb-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .breadcrumb-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #ffffff;
+      color: #1e293b;
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-size: 13.5px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+      border: 1px solid #e2e8f0;
+      pointer-events: auto;
+      transform: translateX(120%);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .breadcrumb-item.show {
+      transform: translateX(0);
+      opacity: 1;
+    }
+
+    .breadcrumb-item .sep {
+      color: #94a3b8;
+      font-size: 11px;
+    }
+
+    .breadcrumb-item .tag {
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 6px;
+    }
+
+    .breadcrumb-item.success {
+      border-left: 4px solid #16a34a;
+    }
+
+    .breadcrumb-item.success .tag {
+      background: #dcfce7;
+      color: #15803d;
+    }
+
+    .breadcrumb-item.danger {
+      border-left: 4px solid #dc2626;
+    }
+
+    .breadcrumb-item.danger .tag {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .breadcrumb-item.info {
+      border-left: 4px solid #2563eb;
+    }
+
+    .breadcrumb-item.info .tag {
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
   </style>
 </head>
 
 <body>
+
+  <!-- Breadcrumb Notification Box -->
+  <div id="breadcrumb-container"></div>
 
   <div class="container">
     <!-- MÀN HÌNH ĐĂNG NHẬP -->
@@ -356,6 +431,7 @@
         </div>
       </div>
 
+      <!-- KHU VỰC QUẢN LÝ SẢN PHẨM -->
       <div class="card">
         <div class="page-toolbar">
           <h3 class="page-title" style="font-size: 1.2rem;">Quản Lý Tồn Kho / Sản Phẩm</h3>
@@ -389,6 +465,7 @@
       </div>
     </div>
   </div>
+
   <!-- POPUP MODAL THÔNG BÁO KẾT QUẢ CHECK-IN -->
   <div id="checkin-modal" class="modal-overlay">
     <div class="modal-content" id="modal-card">
@@ -400,11 +477,11 @@
           <p style="margin: 0; color: #666;">Đang xác thực thông tin vé...</p>
         </div>
       </div>
-      <button class="modal-btn" id="modal-close-btn" style="display: none;" onclick="closeModal()">Đóng / Quét
-        tiếp</button>
+      <button class="modal-btn" id="modal-close-btn" style="display: none;" onclick="closeModal()">Đóng / Quét tiếp</button>
     </div>
   </div>
 
+  <!-- MODAL THÊM / SỬA MẶT HÀNG -->
   <div id="inventory-modal-overlay" class="modal-overlay">
     <div class="modal-content" style="max-width: 560px; text-align: left;">
       <div class="page-toolbar" style="margin-bottom: 16px;">
@@ -432,11 +509,45 @@
       </form>
     </div>
   </div>
+
   <script>
     let scanner = null;
     let isScanning = true;
     let modalTimer = null;
     let inventoryEditingId = null;
+
+    // HÀM HIỂN THỊ THÔNG BÁO DẠNG BREADCRUMB
+    function showBreadcrumb(action, message, type = 'success') {
+      const container = document.getElementById('breadcrumb-container');
+      if (!container) return;
+
+      const toast = document.createElement('div');
+      toast.className = `breadcrumb-item ${type}`;
+
+      const icon = type === 'success' ? '✓' : (type === 'danger' ? '✕' : 'ℹ');
+
+      toast.innerHTML = `
+        <span style="font-weight: bold;">${icon}</span>
+        <span style="color: #64748b;">Kho hàng</span>
+        <span class="sep">/</span>
+        <span class="tag">${action}</span>
+        <span class="sep">/</span>
+        <span>${message}</span>
+      `;
+
+      container.appendChild(toast);
+
+      // Animation trượt vào
+      requestAnimationFrame(() => {
+        toast.classList.add('show');
+      });
+
+      // Tự biến mất sau 3.5 giây
+      setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
 
     function getAuthHeader() {
       const token = localStorage.getItem('tm_admin_token');
@@ -490,7 +601,6 @@
       setTimeout(() => { isScanning = true; }, 400);
     }
 
-    // Hàm phát Rung và Âm thanh
     function triggerFeedback(isSuccess = true) {
       if (navigator.vibrate) {
         if (isSuccess) {
@@ -525,7 +635,6 @@
       if (!isScanning) return;
       isScanning = false;
 
-      // 1. Mở Modal hiển thị trạng thái Loading
       const modal = document.getElementById('checkin-modal');
       const modalCard = document.getElementById('modal-card');
       const modalIcon = document.getElementById('modal-icon');
@@ -540,9 +649,6 @@
       closeBtn.style.display = 'none';
       modal.classList.add('active');
 
-      // Chạy song song: gọi API và đảm bảo delay tối thiểu 1000ms (1 giây)
-      const startTime = Date.now();
-
       try {
         const fetchPromise = fetch('/api/admin/checkin', {
           method: 'POST',
@@ -552,39 +658,37 @@
 
         const [resResult] = await Promise.all([
           fetchPromise,
-          new Promise(resolve => setTimeout(resolve, 1000)) // Đảm bảo hiệu ứng xoay đúng 1s
+          new Promise(resolve => setTimeout(resolve, 1000))
         ]);
 
         const { ok, data } = resResult;
 
         if (ok) {
-          // === CHECK-IN HỢP LỆ ===
           triggerFeedback(true);
           modalCard.classList.add('modal-success');
           modalIcon.innerText = '✅';
           modalTitle.innerText = 'CHECK-IN HỢP LỆ!';
           modalBody.innerHTML = `
-          <p style="margin: 4px 0;"><strong>Khách hàng:</strong> ${data.order.customerName}</p>
-          <p style="margin: 4px 0;"><strong>Mã đơn:</strong> <span style="font-family: monospace;">${data.order.orderCode}</span></p>
-          <p style="margin: 4px 0;"><strong>Email:</strong> ${data.order.customerEmail || '—'}</p>
-          <p style="margin: 4px 0;"><strong>Mặt hàng:</strong> ${data.order.itemsStr}</p>
-          <p style="margin: 4px 0; color: #2e7d32; font-weight: bold;">Thời gian quét: ${new Date(data.order.checkedInAt).toLocaleTimeString('vi-VN')}</p>
-        `;
+            <p style="margin: 4px 0;"><strong>Khách hàng:</strong> ${data.order.customerName}</p>
+            <p style="margin: 4px 0;"><strong>Mã đơn:</strong> <span style="font-family: monospace;">${data.order.orderCode}</span></p>
+            <p style="margin: 4px 0;"><strong>Email:</strong> ${data.order.customerEmail || '—'}</p>
+            <p style="margin: 4px 0;"><strong>Mặt hàng:</strong> ${data.order.itemsStr}</p>
+            <p style="margin: 4px 0; color: #2e7d32; font-weight: bold;">Thời gian quét: ${new Date(data.order.checkedInAt).toLocaleTimeString('vi-VN')}</p>
+          `;
           loadHistory();
         } else {
-          // === KHÔNG HỢP LỆ / ĐÃ SỬ DỤNG ===
           triggerFeedback(false);
           modalCard.classList.add('modal-error');
           modalIcon.innerText = '❌';
           modalTitle.innerText = 'VÉ KHÔNG HỢP LỆ!';
           modalBody.innerHTML = `
-          <p style="color: #c62828; font-weight: bold; margin: 4px 0;">${data.message}</p>
-          ${data.order ? `
-            <hr style="border:none; border-top:1px dashed #ccc; margin:8px 0;">
-            <p style="margin: 4px 0; font-size: 13px;"><strong>Khách:</strong> ${data.order.customer?.name || ''}</p>
-            <p style="margin: 4px 0; font-size: 13px;"><strong>Mã:</strong> ${data.order.orderCode}</p>
-          ` : ''}
-        `;
+            <p style="color: #c62828; font-weight: bold; margin: 4px 0;">${data.message}</p>
+            ${data.order ? `
+              <hr style="border:none; border-top:1px dashed #ccc; margin:8px 0;">
+              <p style="margin: 4px 0; font-size: 13px;"><strong>Khách:</strong> ${data.order.customer?.name || ''}</p>
+              <p style="margin: 4px 0; font-size: 13px;"><strong>Mã:</strong> ${data.order.orderCode}</p>
+            ` : ''}
+          `;
         }
       } catch (err) {
         triggerFeedback(false);
@@ -596,58 +700,9 @@
 
       closeBtn.style.display = 'block';
 
-      // Tự động đóng popup sau 3.5 giây để tiếp tục quét người kế tiếp
       modalTimer = setTimeout(() => {
         closeModal();
       }, 3500);
-    }
-
-    async function onScanSuccess(decodedText) {
-      if (!isScanning) return;
-      isScanning = false;
-
-      const resBox = document.getElementById('scan-result');
-      const readerBox = document.getElementById('reader');
-      resBox.style.display = 'block';
-
-      // Xóa class animation cũ
-      readerBox.classList.remove('scan-success-anim', 'scan-error-anim');
-
-      try {
-        const res = await fetch('/api/admin/checkin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-          body: JSON.stringify({ qrCode: decodedText })
-        });
-
-        const data = await res.json();
-        if (res.ok) {
-          // Kích hoạt rung + âm bíp thành công
-          triggerFeedback(true);
-          readerBox.classList.add('scan-success-anim');
-
-          resBox.className = 'success';
-          resBox.innerHTML = `<strong>✅ HỢP LỆ:</strong> ${data.order.customerName} - ${data.order.itemsStr}`;
-          loadHistory();
-        } else {
-          // Kích hoạt rung cảnh báo lỗi
-          triggerFeedback(false);
-          readerBox.classList.add('scan-error-anim');
-
-          resBox.className = 'error';
-          resBox.innerHTML = `<strong>❌ KHÔNG HỢP LỆ:</strong> ${data.message}`;
-        }
-      } catch (e) {
-        triggerFeedback(false);
-        readerBox.classList.add('scan-error-anim');
-        resBox.className = 'error';
-        resBox.innerText = 'Lỗi kết nối: ' + e.message;
-      }
-
-      setTimeout(() => {
-        readerBox.classList.remove('scan-success-anim', 'scan-error-anim');
-        isScanning = true;
-      }, 2500);
     }
 
     async function loadInventory() {
@@ -709,7 +764,7 @@
 
                 openInventoryModal(item);
               })
-              .catch(() => alert('Không thể lấy thông tin mặt hàng.'));
+              .catch(() => showBreadcrumb('Lỗi', 'Không thể lấy thông tin mặt hàng', 'danger'));
           });
         });
 
@@ -723,9 +778,12 @@
               const res = await fetch(`/api/admin/items/${itemId}`, { method: 'DELETE', headers: getAuthHeader() });
               const data = await res.json();
               if (!res.ok) throw new Error(data.error || 'Xóa thất bại');
+              
+              // Thông báo xóa thành công bằng breadcrumb
+              showBreadcrumb('Xóa', `Đã xóa mặt hàng "${itemId}"`, 'danger');
               loadInventory();
             } catch (err) {
-              alert(err.message || 'Lỗi khi xóa mặt hàng');
+              showBreadcrumb('Lỗi xóa', err.message || 'Lỗi khi xóa mặt hàng', 'danger');
             }
           });
         });
@@ -738,13 +796,22 @@
       const overlay = document.getElementById('inventory-modal-overlay');
       const form = document.getElementById('inventory-form');
       const modalTitle = document.getElementById('inventory-modal-title');
+      const idInput = document.getElementById('inventory-id');
       if (!overlay || !form || !modalTitle) return;
 
       inventoryEditingId = item?.id || null;
       form.reset();
+
+      if (item) {
+        idInput.value = item.id;
+        idInput.disabled = true; // Khóa ID khi chỉnh sửa để tránh trùng/sai khóa chính
+      } else {
+        idInput.value = '';
+        idInput.disabled = false;
+      }
+
       document.getElementById('inventory-title').value = item?.title || item?.name || '';
       document.getElementById('inventory-name').value = item?.name || '';
-      document.getElementById('inventory-id').value = item?.id || '';
       document.getElementById('inventory-type').value = item?.type || 'ticket';
       document.getElementById('inventory-price').value = item?.price || 0;
       const stockValue = item?.baseQuantity !== undefined && item?.baseQuantity !== null
@@ -770,8 +837,11 @@
     async function handleInventorySubmit(event) {
       event.preventDefault();
 
+      const isEdit = Boolean(inventoryEditingId);
+      const itemId = (inventoryEditingId || document.getElementById('inventory-id').value).trim();
+
       const item = {
-        id: document.getElementById('inventory-id').value.trim(),
+        id: itemId,
         name: document.getElementById('inventory-name').value.trim(),
         title: document.getElementById('inventory-title').value.trim() || document.getElementById('inventory-name').value.trim(),
         type: document.getElementById('inventory-type').value,
@@ -806,8 +876,15 @@
 
         closeInventoryModal();
         loadInventory();
+
+        // Thông báo Thêm hoặc Sửa thành công qua breadcrumb
+        if (isEdit) {
+          showBreadcrumb('Cập nhật', `Mặt hàng "${item.name}" đã được lưu`, 'info');
+        } else {
+          showBreadcrumb('Tạo mới', `Mặt hàng "${item.name}" đã được thêm`, 'success');
+        }
       } catch (err) {
-        alert(err.message || 'Lỗi lưu mặt hàng');
+        showBreadcrumb('Lỗi', err.message || 'Lỗi khi lưu mặt hàng', 'danger');
       }
     }
 
@@ -826,19 +903,21 @@
         }
 
         tbody.innerHTML = data.map(o => `
-        <tr>
-          <td>${new Date(o.checkedInAt).toLocaleTimeString('vi-VN')} (${new Date(o.checkedInAt).toLocaleDateString('vi-VN')})</td>
-          <td><strong>${o.orderCode}</strong></td>
-          <td>${o.customerName} <br><small class="muted">${o.customerPhone}</small></td>
-          <small style="color: #0d6efd;">✉️ ${o.customerEmail || '—'}</small>
-          <td>${o.itemsStr}</td>
-          <td><span class="badge">Đã check-in</span></td>
-        </tr>
-      `).join('');
+          <tr>
+            <td>${new Date(o.checkedInAt).toLocaleTimeString('vi-VN')} (${new Date(o.checkedInAt).toLocaleDateString('vi-VN')})</td>
+            <td><strong>${o.orderCode}</strong></td>
+            <td>${o.customerName} <br><small class="muted">${o.customerPhone}</small></td>
+            <td>${o.itemsStr}</td>
+            <td><span class="badge">Đã check-in</span></td>
+          </tr>
+        `).join('');
       } catch (_) { }
     }
 
-    document.getElementById('inventory-refresh-btn')?.addEventListener('click', loadInventory);
+    document.getElementById('inventory-refresh-btn')?.addEventListener('click', () => {
+      loadInventory();
+      showBreadcrumb('Làm mới', 'Đã cập nhật danh sách mặt hàng', 'info');
+    });
     document.getElementById('inventory-add-btn')?.addEventListener('click', () => openInventoryModal());
     document.getElementById('inventory-modal-close-btn')?.addEventListener('click', closeInventoryModal);
     document.getElementById('inventory-cancel-btn')?.addEventListener('click', closeInventoryModal);
