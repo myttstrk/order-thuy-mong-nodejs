@@ -1,9 +1,12 @@
+const PENDING_ORDER_STORAGE_KEY = 'thuymong.pendingOrder';
+
 const appState = {
   tickets: [],
   merch: [],
   cart: [],
   paymentPollTimer: null,
-  paymentExpiryTimer: null
+  paymentExpiryTimer: null,
+  pendingOrderRecovery: null
 };
 
 const formatCurrency = (value) => new Intl.NumberFormat('vi-VN', {
@@ -59,6 +62,34 @@ function startExpiryCountdown(expiresAt, container = document.getElementById('pa
   appState.paymentExpiryTimer = setInterval(updateCountdown, 1000);
 }
 
+function getStoredPendingOrder() {
+  try {
+    const raw = localStorage.getItem(PENDING_ORDER_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
+}
+
+function savePendingOrder(order) {
+  if (!order || !order.orderCode || order.status !== 'Chờ thanh toán') {
+    localStorage.removeItem(PENDING_ORDER_STORAGE_KEY);
+    return;
+  }
+
+  localStorage.setItem(PENDING_ORDER_STORAGE_KEY, JSON.stringify({
+    orderCode: order.orderCode,
+    email: order.customer?.email || '',
+    expiresAt: order.expiresAt || null,
+    status: order.status
+  }));
+}
+
+function clearPendingOrder() {
+  localStorage.removeItem(PENDING_ORDER_STORAGE_KEY);
+}
+
 function showPaymentSuccessModal(order = null) {
   const modal = document.getElementById('payment-success-modal');
   const message = document.getElementById('payment-success-message');
@@ -72,11 +103,103 @@ function showPaymentSuccessModal(order = null) {
   modal.setAttribute('aria-hidden', 'false');
 }
 
+function showPendingOrderRecoveryModal(order = null) {
+  const modal = document.getElementById('pending-order-modal');
+  if (!modal) return;
+
+  const orderCode = order?.orderCode || 'ĐƠN HÀNG';
+  const expiry = order?.expiresAt ? new Date(order.expiresAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '15:00';
+  const title = document.getElementById('pending-order-title');
+  const text = document.getElementById('pending-order-text');
+  const code = document.getElementById('pending-order-code');
+  if (title) title.textContent = 'Bạn đang có đơn chờ thanh toán';
+  if (text) text.textContent = `Đơn ${orderCode} vẫn còn hiệu lực trong vòng ${expiry}. Bạn muốn tiếp tục thanh toán với đơn này hay hủy để tạo đơn mới?`;
+  if (code) code.textContent = `Mã đơn: ${orderCode}`;
+
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+  appState.pendingOrderRecovery = order;
+}
+
+function hidePendingOrderRecoveryModal() {
+  const modal = document.getElementById('pending-order-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+  appState.pendingOrderRecovery = null;
+}
+
+async function restorePendingOrderFromStorage() {
+  const stored = getStoredPendingOrder();
+  if (!stored?.orderCode) return;
+
+  try {
+    const response = await fetch(`/api/orders/${encodeURIComponent(stored.orderCode)}/status${stored.email ? `?email=${encodeURIComponent(stored.email)}` : ''}`);
+    const result = await response.json();
+
+    if (!response.ok || !result.order || result.order.status !== 'Chờ thanh toán') {
+      clearPendingOrder();
+      return;
+    }
+
+    showPendingOrderRecoveryModal({
+      orderCode: result.order.orderCode,
+      email: stored.email || result.order.customer?.email || '',
+      expiresAt: result.order.expiresAt || stored.expiresAt || null,
+      status: result.order.status
+    });
+  } catch (error) {
+    clearPendingOrder();
+  }
+}
+
+async function continuePendingOrder(orderCode, email) {
+  hidePendingOrderRecoveryModal();
+  const paymentInfoEl = document.getElementById('payment-account-info');
+  if (paymentInfoEl) {
+    paymentInfoEl.innerHTML = '<p>Đang tải thông tin đơn đang chờ thanh toán...</p>';
+  }
+
+  try {
+    const response = await fetch(`/api/orders/${encodeURIComponent(orderCode)}/status${email ? `?email=${encodeURIComponent(email)}` : ''}`);
+    const result = await response.json();
+    if (!response.ok || !result.order) throw new Error(result.message || 'Không thể tải đơn chờ thanh toán.');
+
+    if (result.order.status !== 'Chờ thanh toán') {
+      clearPendingOrder();
+      return;
+    }
+
+    const payment = createBankPayment(result.order);
+    if (paymentInfoEl) {
+      paymentInfoEl.innerHTML = `
+        <h4>Quét QR để thanh toán</h4>
+        <img class="payment-qr" src="${payment.paymentQrUrl}" alt="QR thanh toán đơn ${result.order.orderCode}" />
+        <p><strong>Số tiền:</strong> ${formatCurrency(result.order.total)}</p>
+        <p><strong>Nội dung chuyển khoản:</strong> ${payment.transferContent}</p>
+        <p><strong>Ngân hàng:</strong> ${payment.bankName} · <strong>STK:</strong> ${payment.accountNumber}</p>
+        <div class="expiry-countdown" aria-live="polite">Đang tính thời gian giữ vé...</div>
+        <p class="payment-note">Bạn đang tiếp tục thanh toán cho đơn này. Hệ thống sẽ tự xác nhận khi nhận được tiền.</p>
+        <button type="button" class="btn btn-secondary cancel-order-btn" data-order-code="${result.order.orderCode}">Hủy đơn</button>
+      `;
+
+      const cancelBtn = paymentInfoEl.querySelector('.cancel-order-btn');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => cancelPendingOrder(cancelBtn.dataset.orderCode));
+      }
+
+      startExpiryCountdown(result.order.expiresAt, paymentInfoEl);
+      savePendingOrder(result.order);
+      startPaymentStatusPolling(result.order.orderCode, result.order.customer?.email || '');
+    }
+  } catch (error) {
+    clearPendingOrder();
+    showToast(error.message || 'Không thể tiếp tục đơn chờ thanh toán.');
+  }
+}
+
 async function cancelPendingOrder(orderCode) {
   if (!orderCode) return;
-
-  const confirmed = window.confirm('Bạn muốn hủy đơn này để tạo đơn mới ngay?');
-  if (!confirmed) return;
 
   try {
     const response = await fetch(`/api/orders/${encodeURIComponent(orderCode)}/cancel`, {
@@ -97,6 +220,8 @@ async function cancelPendingOrder(orderCode) {
       `;
     }
 
+    clearPendingOrder();
+    hidePendingOrderRecoveryModal();
     appState.cart = [];
     renderCart();
     updateCartButton();
@@ -246,6 +371,7 @@ function startPaymentStatusPolling(orderCode, email) {
       if (result.order.status === 'Đã thanh toán') {
         clearInterval(appState.paymentPollTimer);
         clearInterval(appState.paymentExpiryTimer);
+        clearPendingOrder();
         showToast('Đã nhận thanh toán và cập nhật trạng thái đơn hàng.');
         appState.cart = [];
         renderCart();
@@ -815,6 +941,7 @@ checkoutForm.addEventListener('submit', async (event) => {
       `;
 
       startExpiryCountdown(result.order.expiresAt, paymentInfoEl);
+      savePendingOrder(result.order);
 
       const cancelBtn = paymentInfoEl.querySelector('.cancel-order-btn');
       if (cancelBtn) {
@@ -836,6 +963,7 @@ checkoutForm.addEventListener('submit', async (event) => {
             if (!confirmRes.ok) throw new Error(confirmJson.message || 'Xác nhận thất bại');
 
             btnConfirmPayment.style.display = 'none';
+            clearPendingOrder();
             showToast('Đã gửi xác nhận thanh toán!');
             showPaymentSuccessModal(result.order);
 
@@ -880,4 +1008,36 @@ document.querySelectorAll('[data-close-success-modal]').forEach((el) => {
   el.addEventListener('click', hidePaymentSuccessModal);
 });
 
+document.querySelectorAll('[data-close-pending-order]').forEach((el) => {
+  el.addEventListener('click', hidePendingOrderRecoveryModal);
+});
+
+const pendingOrderContinueBtn = document.getElementById('pending-order-continue');
+if (pendingOrderContinueBtn) {
+  pendingOrderContinueBtn.addEventListener('click', async () => {
+    const stored = getStoredPendingOrder();
+    if (!stored?.orderCode) {
+      hidePendingOrderRecoveryModal();
+      return;
+    }
+
+    await continuePendingOrder(stored.orderCode, stored.email || '');
+  });
+}
+
+const pendingOrderCancelBtn = document.getElementById('pending-order-cancel');
+if (pendingOrderCancelBtn) {
+  pendingOrderCancelBtn.addEventListener('click', async () => {
+    const stored = getStoredPendingOrder();
+    if (!stored?.orderCode) {
+      hidePendingOrderRecoveryModal();
+      return;
+    }
+
+    hidePendingOrderRecoveryModal();
+    await cancelPendingOrder(stored.orderCode);
+  });
+}
+
 loadData();
+restorePendingOrderFromStorage();

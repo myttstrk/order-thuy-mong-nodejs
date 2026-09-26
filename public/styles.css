@@ -668,6 +668,72 @@ small {
   transform: translateY(0);
 }
 
+.pending-order-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pending-order-modal.hidden {
+  display: none;
+}
+
+.pending-order-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 13, 15, 0.72);
+}
+
+.pending-order-modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(92vw, 480px);
+  background: #fffaf2;
+  color: #1d1713;
+  border-radius: 22px;
+  padding: 28px 22px 20px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+  text-align: center;
+}
+
+.pending-order-modal-card h3 {
+  margin: 0 0 10px;
+  color: #17110e;
+  font-size: 1.6rem;
+  font-weight: 800;
+}
+
+.pending-order-modal-card p {
+  margin: 0;
+  color: #2f2925;
+  line-height: 1.7;
+  font-weight: 600;
+}
+
+.pending-order-meta {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(241, 198, 110, 0.12);
+  border: 1px solid rgba(199, 157, 101, 0.25);
+  color: #1d1713;
+  font-weight: 700;
+}
+
+.pending-order-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.pending-order-actions .btn {
+  width: 100%;
+}
+
 .success-modal {
   position: fixed;
   inset: 0;

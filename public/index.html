@@ -254,6 +254,20 @@
       </footer>
     </div>
 
+    <div id="pending-order-modal" class="pending-order-modal hidden" aria-hidden="true">
+      <div class="pending-order-modal-backdrop" data-close-pending-order="true"></div>
+      <div class="pending-order-modal-card" role="dialog" aria-modal="true" aria-labelledby="pending-order-title">
+        <div class="success-modal-icon" style="background: linear-gradient(135deg, #f1c66b, #d9a85c); color: #17110e;">!</div>
+        <h3 id="pending-order-title">Bạn đang có đơn chờ thanh toán</h3>
+        <p id="pending-order-text">Đơn của bạn vẫn còn thời gian thanh toán. Bạn muốn tiếp tục tiếp tục đơn này hay hủy để đặt lại?</p>
+        <div class="pending-order-meta" id="pending-order-code"></div>
+        <div class="pending-order-actions">
+          <button type="button" id="pending-order-continue" class="btn btn-primary">Tiếp tục đơn</button>
+          <button type="button" id="pending-order-cancel" class="btn btn-secondary">Hủy đơn</button>
+        </div>
+      </div>
+    </div>
+
     <div id="payment-success-modal" class="success-modal hidden" aria-hidden="true">
       <div class="success-modal-backdrop" data-close-success-modal="true"></div>
       <div class="success-modal-card" role="dialog" aria-modal="true" aria-labelledby="payment-success-title">
