@@ -23,10 +23,10 @@ const BUNDLED_ITEMS_FILE = path.join(__dirname, 'data', 'items.json');
 // CƠ CHẾ CHỐNG SPAM (ANTI-SPAM IN-MEMORY)
 // ==========================================
 const ipRateLimitMap = new Map();
-const IP_WINDOW_MS = 10 * 60 * 1000; // 10 phút
-const MAX_ORDERS_PER_IP = 5;          // Tối đa 5 đơn / IP / 10 phút
-const MAX_PENDING_PER_USER = 2;       // Tối đa 2 đơn "Chờ thanh toán" trên cùng SĐT/Email
-const ORDER_EXPIRY_MS = 15 * 60 * 1000; // Đơn chờ thanh toán quá 15 phút tính là hết hạn
+const IP_WINDOW_MS = 10 * 60 * 1000;    // 10 phút
+const MAX_ORDERS_PER_IP = 5;             // Tối đa 5 đơn / IP / 10 phút
+const MAX_PENDING_PER_USER = 1;          // Tối đa 1 đơn "Chờ thanh toán" trên cùng SĐT/Email
+const ORDER_EXPIRY_MS = 15 * 60 * 1000;  // Đơn chờ thanh toán quá 15 phút tính là hết hạn
 
 // Dọn dẹp cache rate limit định kỳ tránh leak RAM
 setInterval(() => {
@@ -646,10 +646,10 @@ app.get('/api/captcha', (req, res) => {
 });
 
 // ==========================================
-// TẠO ĐƠN HÀNG (CÓ CHỐNG SPAM TOÀN DIỆN)
+// TẠO ĐƠN HÀNG (TÁI SỬ DỤNG ĐƠN CŨ NẾU CÒN HẠN)
 // ==========================================
 app.post('/api/orders', async (req, res) => {
-  // 1. Chống Spam: Bẫy Honeypot (Nếu bot điền vào trường ẩn này, chặn ngay)
+  // 1. Chống Spam: Bẫy Honeypot
   if (req.body?.website || req.body?.address_confirm) {
     console.warn('[SPAM BOT TRAPPED] Phát hiện bot điền honeypot field.');
     return res.status(400).json({ message: 'Yêu cầu không hợp lệ.' });
@@ -694,7 +694,7 @@ app.post('/api/orders', async (req, res) => {
     return res.status(400).json({ message: 'Vui lòng nhập đầy đủ họ tên, số điện thoại và email.' });
   }
 
-  // Kiểm tra định dạng và MX Record Email
+  // Kiểm tra email MX Record
   const emailParts = normalizedCustomer.email.split('@');
   if (emailParts.length !== 2) {
     return res.status(400).json({ message: 'Địa chỉ email không đúng định dạng.' });
@@ -719,24 +719,62 @@ app.post('/api/orders', async (req, res) => {
     return res.status(400).json({ message: 'Số điện thoại không hợp lệ. Vui lòng nhập số điện thoại Việt Nam thực tế.' });
   }
 
-  // 3. Chống Spam: Giới hạn đơn "Chờ thanh toán" đang treo trên cùng SĐT/Email
-  const recentOrders = await readOrdersPersistent(1500);
+  // 3. Chống Spam: Tìm đơn "Chờ thanh toán" còn hiệu lực (< 15 phút) của người dùng này
   const currentTime = Date.now();
+  const fifteenMinutesAgo = new Date(currentTime - ORDER_EXPIRY_MS).toISOString();
+  let existingPendingOrder = null;
 
-  const activePendingCount = recentOrders.filter((o) => {
-    if (o.status !== 'Chờ thanh toán') return false;
-    const samePhone = (o.customer?.phone || '').replace(/\D/g, '') === cleanPhone;
-    const sameEmail = String(o.customer?.email || '').trim().toLowerCase() === normalizedCustomer.email;
-    const isNotExpired = (currentTime - new Date(o.createdAt).getTime()) < ORDER_EXPIRY_MS;
-    return (samePhone || sameEmail) && isNotExpired;
-  }).length;
+  if (supabaseEnabled) {
+    try {
+      const pendingRows = await supabaseRequest(
+        `orders?order_data->>status=eq.Chờ thanh toán&created_at=gte.${encodeURIComponent(fifteenMinutesAgo)}&select=order_data&order=created_at.desc&limit=50`
+      );
 
-  if (activePendingCount >= MAX_PENDING_PER_USER) {
-    return res.status(429).json({
-      message: `Bạn đang có ${activePendingCount} đơn hàng đang chờ thanh toán. Vui lòng hoàn tất thanh toán hoặc chờ 15 phút trước khi tạo đơn tiếp theo.`
+      if (Array.isArray(pendingRows)) {
+        for (const r of pendingRows) {
+          const o = r.order_data;
+          if (!o || !o.customer) continue;
+          const phoneMatch = String(o.customer.phone || '').replace(/\D/g, '') === cleanPhone;
+          const emailMatch = String(o.customer.email || '').toLowerCase().trim() === normalizedCustomer.email;
+          if (phoneMatch || emailMatch) {
+            existingPendingOrder = o;
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Lỗi kiểm tra pending orders trên Supabase:', err.message);
+    }
+  }
+
+  // Fallback kiểm tra trong orders local nếu Supabase không tìm thấy
+  if (!existingPendingOrder) {
+    const localOrders = readOrders();
+    for (let i = localOrders.length - 1; i >= 0; i--) {
+      const o = localOrders[i];
+      if (o.status !== 'Chờ thanh toán') continue;
+      const phoneMatch = String(o.customer?.phone || '').replace(/\D/g, '') === cleanPhone;
+      const emailMatch = String(o.customer?.email || '').toLowerCase().trim() === normalizedCustomer.email;
+      const isNotExpired = (currentTime - new Date(o.createdAt).getTime()) < ORDER_EXPIRY_MS;
+      if ((phoneMatch || emailMatch) && isNotExpired) {
+        existingPendingOrder = o;
+        break;
+      }
+    }
+  }
+
+  // NẾU ĐÃ CÓ ĐƠN CHỜ THANH TOÁN -> DẪN VỀ MÃ QR ĐƠN CŨ NGAY (TIẾT KIỆM TÀI NGUYÊN VERCEL & TRÁNH SPAM)
+  if (existingPendingOrder) {
+    const existingPayment = createBankPayment(existingPendingOrder);
+    return res.status(200).json({
+      message: 'Bạn có một đơn hàng đang chờ thanh toán. Đang chuyển bạn đến mã thanh toán...',
+      isExistingOrder: true,
+      order: existingPendingOrder,
+      payment: existingPayment
     });
   }
 
+  // 4. Nếu chưa có đơn pending -> Tạo đơn mới bình thường
   const items = cart.items.map((item) => ({
     id: item.id,
     name: item.name,
@@ -782,11 +820,10 @@ app.post('/api/orders', async (req, res) => {
 
   const payment = createBankPayment(order);
 
-  // Lưu đơn vào Database / Bộ nhớ
   await saveOrderPersistent(order);
   inventoryCacheTime = 0;
 
-  // Ghi đơn vào Google Sheet (Gửi ngầm không chặn luồng phản hồi)
+  // Ghi đơn vào Google Sheet ngầm (Non-blocking)
   const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
   if (sheetWebhookUrl) {
     fetchWithTimeout(sheetWebhookUrl, {
@@ -811,6 +848,7 @@ app.post('/api/orders', async (req, res) => {
 
   res.status(201).json({
     message: 'Đặt vé thành công!',
+    isExistingOrder: false,
     order,
     payment
   });
@@ -842,6 +880,36 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
       checkedInAt: order.checkedInAt || null
     }
   });
+});
+
+// API Hủy đơn hàng đang chờ thanh toán (Giúp khách đặt lại đơn khác ngay lập tức)
+app.post('/api/orders/:orderCode/cancel', async (req, res) => {
+  const { orderCode } = req.params;
+  const order = await findOrderPersistent(orderCode);
+
+  if (!order) {
+    return res.status(404).json({ message: 'Không tìm thấy đơn hàng.' });
+  }
+
+  if (order.status === 'Chờ thanh toán') {
+    order.status = 'Đã hủy';
+    order.ticketStatus = 'Đã hủy';
+    order.cancelledAt = new Date().toISOString();
+    await saveOrderPersistent(order);
+    inventoryCacheTime = 0;
+    return res.json({
+      success: true,
+      message: 'Đã hủy đơn hàng thành công.',
+      order: {
+        orderCode: order.orderCode,
+        status: order.status,
+        ticketStatus: order.ticketStatus,
+        cancelledAt: order.cancelledAt
+      }
+    });
+  }
+
+  return res.status(400).json({ message: 'Đơn hàng không thể hủy do đã thanh toán hoặc đã hủy trước đó.' });
 });
 
 // ==========================================

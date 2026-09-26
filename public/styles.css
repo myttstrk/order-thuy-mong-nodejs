@@ -557,6 +557,31 @@ small {
   color: #f3e7c8;
 }
 
+.cancel-order-btn {
+  margin-top: 16px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 138, 138, 0.5);
+  color: #ffd8d8;
+}
+
+.cancelled-order-box {
+  padding: 18px 0 8px;
+  text-align: center;
+}
+
+.cancelled-order-box h4 {
+  margin: 0 0 12px;
+  color: #f7d9d9;
+  font-size: clamp(1.25rem, 2.9vw, 1.8rem);
+}
+
+.cancelled-order-box p {
+  margin: 8px 0;
+  color: rgba(246, 242, 234, 0.8);
+  line-height: 1.6;
+}
+
 .site-footer {
   background: #051a1d;
   border-top: 1px solid rgba(241, 198, 110, 0.1);

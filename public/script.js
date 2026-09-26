@@ -39,6 +39,47 @@ function showPaymentSuccessModal(order = null) {
   modal.setAttribute('aria-hidden', 'false');
 }
 
+async function cancelPendingOrder(orderCode) {
+  if (!orderCode) return;
+
+  const confirmed = window.confirm('Bạn muốn hủy đơn này để tạo đơn mới ngay?');
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch(`/api/orders/${encodeURIComponent(orderCode)}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Không thể hủy đơn hàng.');
+
+    const paymentInfoEl = document.getElementById('payment-account-info');
+    if (paymentInfoEl) {
+      paymentInfoEl.innerHTML = `
+        <div class="cancelled-order-box">
+          <h4>Đơn hàng đã được hủy</h4>
+          <p>Đơn <strong>${orderCode}</strong> đã chuyển thành <strong>Đã hủy</strong> và slot đã được giải phóng.</p>
+          <p>Bạn có thể đặt lại đơn mới ngay bây giờ.</p>
+        </div>
+      `;
+    }
+
+    appState.cart = [];
+    renderCart();
+    updateCartButton();
+    showToast('Đã hủy đơn hàng. Bạn có thể tạo đơn mới ngay lập tức.');
+
+    const submitBtn = document.querySelector('#checkout-form button[type="submit"]');
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Thanh toán bằng QR';
+    }
+  } catch (error) {
+    showToast(error.message || 'Không thể hủy đơn hàng.');
+  }
+}
+
 function hidePaymentSuccessModal() {
   const modal = document.getElementById('payment-success-modal');
   if (!modal) return;
@@ -725,7 +766,13 @@ checkoutForm.addEventListener('submit', async (event) => {
         <p><strong>Nội dung chuyển khoản:</strong> ${payment.transferContent}</p>
         <p><strong>Ngân hàng:</strong> ${payment.bankName} · <strong>STK:</strong> ${payment.accountNumber}</p>
         <p class="payment-note">Sau khi chuyển khoản thành công, hệ thống sẽ tự động xác nhận thanh toán và hiển thị QR check-in ngay trên màn hình cho bạn.</p>
+        <button type="button" class="btn btn-secondary cancel-order-btn" data-order-code="${result.order.orderCode}">Hủy đơn</button>
       `;
+
+      const cancelBtn = paymentInfoEl.querySelector('.cancel-order-btn');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => cancelPendingOrder(cancelBtn.dataset.orderCode));
+      }
 
       const btnConfirmPayment = document.getElementById('btn-confirm-payment');
       if (btnConfirmPayment) {

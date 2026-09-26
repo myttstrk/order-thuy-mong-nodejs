@@ -363,6 +363,15 @@ th {
   background: var(--success-soft);
   color: #1f7a52;
   border-color: rgba(45, 167, 109, 0.2);
+  animation: successShake 0.45s ease-in-out 2;
+}
+
+@keyframes successShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px) rotate(-1deg); }
+  40% { transform: translateX(5px) rotate(1deg); }
+  60% { transform: translateX(-4px) rotate(-1deg); }
+  80% { transform: translateX(4px) rotate(1deg); }
 }
 
 .scan-result.error {

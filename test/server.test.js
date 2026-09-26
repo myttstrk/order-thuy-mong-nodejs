@@ -106,6 +106,35 @@ test('POST /api/orders creates a pending order with total and orderCode', async 
   }
 });
 
+test('POST /api/orders/:orderCode/cancel frees the pending slot so customer can re-create order immediately', async () => {
+  const server = app.listen(0);
+  try {
+    const port = server.address().port;
+    const payload = {
+      customer: { name: 'Khách hủy đơn', phone: '0909999999', email: 'cancel@example.com' },
+      cart: { items: [{ id: 'pt', name: 'Vé Phổ Thông', price: 100000, quantity: 1, type: 'ticket' }] },
+      paymentMethod: 'BANK',
+      captcha: { token: 'skip', answer: 'skip' }
+    };
+
+    const first = await request(global.fetch, 'POST', '/api/orders', payload, port);
+    assert.equal(first.status, 201);
+    assert.equal(first.json.order.status, 'Chờ thanh toán');
+
+    const cancel = await request(global.fetch, 'POST', `/api/orders/${first.json.order.orderCode}/cancel`, {}, port);
+    assert.equal(cancel.status, 200);
+    assert.equal(cancel.json.success, true);
+    assert.equal(cancel.json.order.status, 'Đã hủy');
+
+    const second = await request(global.fetch, 'POST', '/api/orders', payload, port);
+    assert.equal(second.status, 201);
+    assert.equal(second.json.order.status, 'Chờ thanh toán');
+    assert.notEqual(second.json.order.orderCode, first.json.order.orderCode);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('POST /api/orders saves deliveryLocation and defaults to Nhận tại sự kiện', async () => {
   const server = app.listen(0);
   try {
