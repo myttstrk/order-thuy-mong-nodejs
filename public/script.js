@@ -14,10 +14,36 @@ const formatCurrency = (value) => new Intl.NumberFormat('vi-VN', {
 const toast = document.getElementById('toast');
 
 function showToast(message) {
-  toast.textContent = message;
+  toast.innerHTML = `
+    <span class="toast-breadcrumb">Thủy Mộng</span>
+    <span class="toast-separator">/</span>
+    <span class="toast-breadcrumb">Thông báo</span>
+    <span class="toast-separator">/</span>
+    <span class="toast-text">${message}</span>
+  `;
   toast.classList.add('show');
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 2200);
+}
+
+function showPaymentSuccessModal(order = null) {
+  const modal = document.getElementById('payment-success-modal');
+  const message = document.getElementById('payment-success-message');
+  const meta = document.getElementById('payment-success-meta');
+  if (!modal || !message || !meta) return;
+
+  const orderCode = order?.orderCode || 'ĐƠN HÀNG';
+  message.textContent = 'Đơn hàng của bạn đã được xác nhận. QR check-in sẽ được gửi qua email hoặc hiển thị ngay trên màn hình.';
+  meta.innerHTML = `<strong>Mã đơn hàng:</strong> ${orderCode}`;
+  modal.classList.remove('hidden');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function hidePaymentSuccessModal() {
+  const modal = document.getElementById('payment-success-modal');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
 }
 
 function addItemToCart(item, quantity = 1) {
@@ -120,6 +146,7 @@ function startPaymentStatusPolling(orderCode, email) {
         appState.cart = [];
         renderCart();
         updateCartButton();
+        showPaymentSuccessModal(result.order);
       }
     } catch (error) {
       console.warn('Unable to refresh payment status:', error);
@@ -712,6 +739,7 @@ checkoutForm.addEventListener('submit', async (event) => {
             proofStatusMsg.textContent = '✓ Bạn đã thanh toán! Ban tổ chức sẽ kiểm tra và xác nhận sớm. Nếu trong vòng 12 tiếng kể từ khi đăng ký bạn vẫn chưa nhận được mail xác nhận, hãy nhắn chúng mình qua Fanpage: Thuỷ Mộng';
             proofStatusMsg.style.color = '#2da76d';
             showToast('Đã gửi xác nhận thanh toán!');
+            showPaymentSuccessModal(result.order);
             
             appState.cart = [];
             renderCart();
@@ -751,5 +779,9 @@ if (navBookButton) {
     document.getElementById('tickets').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
+
+document.querySelectorAll('[data-close-success-modal]').forEach((el) => {
+  el.addEventListener('click', hidePaymentSuccessModal);
+});
 
 loadData();

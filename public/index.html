@@ -254,6 +254,20 @@
       </footer>
     </div>
 
+    <div id="payment-success-modal" class="success-modal hidden" aria-hidden="true">
+      <div class="success-modal-backdrop" data-close-success-modal="true"></div>
+      <div class="success-modal-card" role="dialog" aria-modal="true" aria-labelledby="payment-success-title">
+        <button type="button" class="success-modal-close" data-close-success-modal="true" aria-label="Đóng">×</button>
+        <div class="success-modal-icon">✓</div>
+        <h3 id="payment-success-title">Thanh toán thành công</h3>
+        <p id="payment-success-message">Đơn hàng của bạn đã được xác nhận. QR check-in sẽ được gửi qua email hoặc hiển thị ngay trên màn hình.</p>
+        <div class="success-modal-meta" id="payment-success-meta"></div>
+        <div class="success-modal-actions">
+          <button type="button" class="btn btn-primary" data-close-success-modal="true">Đóng</button>
+        </div>
+      </div>
+    </div>
+
     <div id="toast" class="toast" aria-live="polite"></div>
 
     <script src="/assets/script.js?v=7"></script>

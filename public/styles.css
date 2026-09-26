@@ -562,20 +562,127 @@ small {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  background: rgba(10, 20, 23, 0.9);
-  color: white;
-  padding: 0.9rem 1.2rem;
-  border-radius: 12px;
-  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(92vw, 660px);
+  background: rgba(10, 20, 23, 0.92);
+  color: rgba(246, 242, 234, 0.9);
+  padding: 0.8rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(241, 198, 110, 0.22);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.2);
   opacity: 0;
   transform: translateY(16px);
   pointer-events: none;
   transition: opacity 0.25s ease, transform 0.25s ease;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.toast-breadcrumb {
+  color: #f1c66b;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.toast-separator {
+  color: rgba(246, 242, 234, 0.58);
+  font-weight: 600;
+}
+
+.toast-text {
+  color: #f6f2ea;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .toast.show {
   opacity: 1;
   transform: translateY(0);
+}
+
+.success-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.success-modal.hidden {
+  display: none;
+}
+
+.success-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 13, 15, 0.72);
+}
+
+.success-modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(92vw, 460px);
+  background: #fffaf2;
+  color: #1d1713;
+  border-radius: 22px;
+  padding: 28px 22px 20px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+  text-align: center;
+}
+
+.success-modal-icon {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #2bb673, #1c8d5a);
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 800;
+}
+
+.success-modal-card h3 {
+  margin: 0 0 10px;
+  color: #1d1713;
+  font-size: 1.8rem;
+}
+
+.success-modal-card p {
+  margin: 0;
+  color: rgba(29, 23, 19, 0.72);
+  line-height: 1.6;
+}
+
+.success-modal-meta {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(241, 198, 110, 0.12);
+  border: 1px solid rgba(199, 157, 101, 0.25);
+  color: #1d1713;
+  font-weight: 600;
+}
+
+.success-modal-actions {
+  margin-top: 18px;
+}
+
+.success-modal-close {
+  position: absolute;
+  right: 14px;
+  top: 12px;
+  border: none;
+  background: transparent;
+  color: rgba(29, 23, 19, 0.7);
+  font-size: 2rem;
+  cursor: pointer;
+  line-height: 1;
 }
 
 @media (max-width: 980px) {
