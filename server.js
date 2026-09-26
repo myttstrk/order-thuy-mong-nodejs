@@ -873,7 +873,8 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
     return res.status(404).json({ message: 'Không tìm thấy đơn hàng.' });
   }
 
-  const orderExpiresAt = order.expiresAt || new Date(new Date(order.createdAt || Date.now()).getTime() + ORDER_EXPIRY_MS).toISOString();
+  // Tự động sinh thông tin thanh toán chuẩn từ env trên server
+  const payment = createBankPayment(order);
 
   return res.json({
     order: {
@@ -888,8 +889,9 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
       paidAt: order.paidAt || null,
       checkedInAt: order.checkedInAt || null,
       createdAt: order.createdAt,
-      expiresAt: orderExpiresAt
-    }
+      expiresAt: order.expiresAt || new Date(new Date(order.createdAt).getTime() + ORDER_EXPIRY_MS).toISOString()
+    },
+    payment 
   });
 });
 

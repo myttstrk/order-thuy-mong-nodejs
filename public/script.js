@@ -170,8 +170,10 @@ async function continuePendingOrder(orderCode, email) {
       return;
     }
 
-    const payment = createBankPayment(result.order);
-    if (paymentInfoEl) {
+    // LẤY TRỰC TIẾP TỪ SERVER TRẢ VỀ (ĂN THEO ENV TRÊN VERCEL)
+    const payment = result.payment;
+
+    if (paymentInfoEl && payment) {
       paymentInfoEl.innerHTML = `
         <h4>Quét QR để thanh toán</h4>
         <img class="payment-qr" src="${payment.paymentQrUrl}" alt="QR thanh toán đơn ${result.order.orderCode}" />
@@ -197,7 +199,6 @@ async function continuePendingOrder(orderCode, email) {
     showToast(error.message || 'Không thể tiếp tục đơn chờ thanh toán.');
   }
 }
-
 async function cancelPendingOrder(orderCode) {
   if (!orderCode) return;
 
@@ -413,15 +414,15 @@ function renderTickets() {
         </div>
         <p>${ticket.description || ticket.benefit || ''}</p>
         <div class="choose-row">
-          ${isSoldOut 
-            ? '<span class="sold-out-badge" style="color: #e74c3c; font-weight: bold; padding: 8px 16px; background: rgba(231, 76, 60, 0.1); border-radius: 4px; width: 100%; text-align: center;">Đã hết vé</span>'
-            : `<div class="qty-control">
+          ${isSoldOut
+          ? '<span class="sold-out-badge" style="color: #e74c3c; font-weight: bold; padding: 8px 16px; background: rgba(231, 76, 60, 0.1); border-radius: 4px; width: 100%; text-align: center;">Đã hết vé</span>'
+          : `<div class="qty-control">
                 <button type="button" class="qty-btn" data-action="decrease" data-id="${ticket.id}" data-type="ticket">−</button>
                 <input type="number" class="qty-input" data-qty="${ticket.id}" data-type="ticket" value="1" min="1" max="${max}" />
                 <button type="button" class="qty-btn" data-action="increase" data-id="${ticket.id}" data-type="ticket">+</button>
               </div>
               <button class="add-to-cart" data-add="${ticket.id}" data-type="ticket">Thêm</button>`
-          }
+        }
         </div>
       </article>
     `;
@@ -454,8 +455,8 @@ function renderMerch() {
         <p>${getMerchDesc(item)}</p>
         <div class="choose-row">
           ${isSoldOut
-            ? '<span class="sold-out-badge" style="color: #e74c3c; font-weight: bold; padding: 8px 16px; background: rgba(231, 76, 60, 0.1); border-radius: 4px; width: 100%; text-align: center;">Đã hết hàng</span>'
-            : `<div class="qty-control">
+          ? '<span class="sold-out-badge" style="color: #e74c3c; font-weight: bold; padding: 8px 16px; background: rgba(231, 76, 60, 0.1); border-radius: 4px; width: 100%; text-align: center;">Đã hết hàng</span>'
+          : `<div class="qty-control">
                 <button type="button" class="qty-btn" data-action="decrease" data-id="${item.id}" data-type="merch">−</button>
                 <input type="number" class="qty-input" data-qty="${item.id}" data-type="merch" value="1" min="1" max="${max}" />
                 <button type="button" class="qty-btn" data-action="increase" data-id="${item.id}" data-type="merch">+</button>
@@ -739,22 +740,22 @@ async function generateCaptcha() {
   const ctx = canvas ? canvas.getContext('2d') : null;
   const inputToken = document.getElementById('captcha-token');
   const inputAnswer = document.getElementById('captcha-input');
-  
+
   if (ctx && inputToken && inputAnswer) {
     try {
       const response = await fetch('/api/captcha');
       const data = await response.json();
-      
+
       const img = new Image();
       img.onload = () => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       };
       img.src = data.image;
-      
+
       inputToken.value = data.token;
       inputAnswer.value = '';
-      
+
       if (!canvas.dataset.clickable) {
         canvas.addEventListener('click', generateCaptcha);
         canvas.dataset.clickable = 'true';
@@ -808,13 +809,13 @@ async function readPaymentProofAsDataUrl(file) {
             try {
               const formData = new FormData();
               formData.append('image', blob, file.name || 'receipt.jpg');
-              
+
               // Đẩy lên ImgBB
               const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
                 method: 'POST',
                 body: formData
               });
-              
+
               const data = await res.json();
               if (data && data.success) {
                 resolve(data.data.url); // Trả về URL của ảnh
