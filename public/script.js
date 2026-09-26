@@ -46,23 +46,42 @@ function hidePaymentSuccessModal() {
   modal.setAttribute('aria-hidden', 'true');
 }
 
+function getItemMax(item) {
+  if (!item) return 999;
+  const value = Number(item.quantity ?? item.baseQuantity ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 function addItemToCart(item, quantity = 1) {
+  const normalizedQty = Number(quantity);
+  const max = getItemMax(item);
+
+  if (!Number.isFinite(normalizedQty) || normalizedQty <= 0) {
+    showToast('Số lượng phải lớn hơn 0.');
+    return;
+  }
+
   const existing = appState.cart.find((entry) => entry.id === item.id && entry.type === item.type);
-  const max = item.quantity !== undefined ? item.quantity : 999;
+
+  if (max <= 0) {
+    showToast('Sản phẩm đã hết hàng.');
+    return;
+  }
 
   if (existing) {
-    if (existing.quantity + quantity > max) {
-      alert(`Chỉ còn ${max} sản phẩm trong kho!`);
+    const nextQty = existing.quantity + normalizedQty;
+    if (nextQty > max) {
+      showToast(`Chỉ còn ${max} sản phẩm trong kho!`);
       existing.quantity = max;
     } else {
-      existing.quantity += quantity;
+      existing.quantity = nextQty;
     }
   } else {
-    if (quantity > max) {
-      alert(`Chỉ còn ${max} sản phẩm trong kho!`);
-      quantity = max;
+    const safeQty = Math.min(normalizedQty, max);
+    if (normalizedQty > max) {
+      showToast(`Chỉ còn ${max} sản phẩm trong kho!`);
     }
-    appState.cart.push({ ...item, quantity });
+    appState.cart.push({ ...item, quantity: safeQty });
   }
 
   renderCart();
@@ -89,11 +108,11 @@ function changeCartQuantity(id, type, delta) {
 
   const source = type === 'ticket' ? appState.tickets : appState.merch;
   const originalItem = source.find(entry => entry.id === id);
-  const max = originalItem?.quantity !== undefined ? originalItem.quantity : 999;
+  const max = getItemMax(originalItem);
 
   if (delta > 0) {
     if (item.quantity + delta > max) {
-      alert(`Chỉ còn ${max} sản phẩm trong kho!`);
+      showToast(`Chỉ còn ${max} sản phẩm trong kho!`);
       item.quantity = max;
     } else {
       item.quantity += delta;
@@ -172,7 +191,8 @@ function renderTickets() {
   const container = document.getElementById('ticket-grid');
   container.innerHTML = appState.tickets
     .map((ticket) => {
-      const isSoldOut = ticket.quantity !== undefined && ticket.quantity <= 0;
+      const max = getItemMax(ticket);
+      const isSoldOut = max <= 0;
       return `
       <article class="ticket-card ${isSoldOut ? 'sold-out' : ''}">
         <img src="${getTicketImageSrc(ticket)}" alt="${ticket.name}" class="ticket-card-img" />
@@ -186,7 +206,7 @@ function renderTickets() {
             ? '<span class="sold-out-badge" style="color: #e74c3c; font-weight: bold; padding: 8px 16px; background: rgba(231, 76, 60, 0.1); border-radius: 4px; width: 100%; text-align: center;">Đã hết vé</span>'
             : `<div class="qty-control">
                 <button type="button" class="qty-btn" data-action="decrease" data-id="${ticket.id}" data-type="ticket">−</button>
-                <input type="number" class="qty-input" data-qty="${ticket.id}" data-type="ticket" value="1" min="1" max="${ticket.quantity !== undefined ? ticket.quantity : 999}" />
+                <input type="number" class="qty-input" data-qty="${ticket.id}" data-type="ticket" value="1" min="1" max="${max}" />
                 <button type="button" class="qty-btn" data-action="increase" data-id="${ticket.id}" data-type="ticket">+</button>
               </div>
               <button class="add-to-cart" data-add="${ticket.id}" data-type="ticket">Thêm</button>`
@@ -210,8 +230,11 @@ function getMerchDesc(item) {
 function renderMerch() {
   const container = document.getElementById('merch-grid');
   container.innerHTML = appState.merch
-    .map((item) => `
-      <article class="merch-card">
+    .map((item) => {
+      const max = getItemMax(item);
+      const isSoldOut = max <= 0;
+      return `
+      <article class="merch-card ${isSoldOut ? 'sold-out' : ''}">
         ${getMerchImageHtml(item)}
         <div class="ticket-top">
           <h3>${item.name}</h3>
@@ -219,28 +242,39 @@ function renderMerch() {
         </div>
         <p>${getMerchDesc(item)}</p>
         <div class="choose-row">
-          <div class="qty-control">
-            <button type="button" class="qty-btn" data-action="decrease" data-id="${item.id}" data-type="merch">−</button>
-            <input type="number" class="qty-input" data-qty="${item.id}" data-type="merch" value="1" min="1" max="${item.quantity !== undefined ? item.quantity : 999}" />
-            <button type="button" class="qty-btn" data-action="increase" data-id="${item.id}" data-type="merch">+</button>
-          </div>
-          <button class="add-to-cart" data-add="${item.id}" data-type="merch">Thêm</button>
+          ${isSoldOut
+            ? '<span class="sold-out-badge" style="color: #e74c3c; font-weight: bold; padding: 8px 16px; background: rgba(231, 76, 60, 0.1); border-radius: 4px; width: 100%; text-align: center;">Đã hết hàng</span>'
+            : `<div class="qty-control">
+                <button type="button" class="qty-btn" data-action="decrease" data-id="${item.id}" data-type="merch">−</button>
+                <input type="number" class="qty-input" data-qty="${item.id}" data-type="merch" value="1" min="1" max="${max}" />
+                <button type="button" class="qty-btn" data-action="increase" data-id="${item.id}" data-type="merch">+</button>
+              </div>
+              <button class="add-to-cart" data-add="${item.id}" data-type="merch">Thêm</button>`}
         </div>
       </article>
-    `)
+    `;
+    })
     .join('');
 
   bindQuantityButtons(container);
   bindAddButtons(container);
 }
 
+function clampQuantity(value, max) {
+  const safeMax = Number.isFinite(max) && max > 0 ? max : 999;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.min(Math.max(1, parsed), safeMax);
+}
+
 function updateQtyValue(id, type, delta) {
   const qtyEl = document.querySelector(`[data-qty="${id}"]`);
   if (!qtyEl) return;
 
-  const current = Number(qtyEl.textContent) || 1;
-  const next = Math.max(1, current + delta);
-  qtyEl.textContent = next;
+  const current = Number(qtyEl.value) || 1;
+  const max = Number(qtyEl.getAttribute('max')) || 999;
+  const next = clampQuantity(current + delta, max);
+  qtyEl.value = next;
 
   const addButton = document.querySelector(`[data-add="${id}"][data-type="${type}"]`);
   if (addButton) {
@@ -257,18 +291,37 @@ function bindQuantityButtons(container) {
 
       const current = Number(qtyEl.value) || 1;
       const max = Number(qtyEl.getAttribute('max')) || 999;
-      const next = action === 'increase' ? Math.min(max, current + 1) : Math.max(1, current - 1);
+
+      if (action === 'increase' && current >= max) {
+        qtyEl.value = String(max);
+        showToast(`Chỉ còn ${max} sản phẩm trong kho!`);
+        return;
+      }
+
+      if (action === 'decrease' && current <= 1) {
+        qtyEl.value = '1';
+        return;
+      }
+
+      const next = action === 'increase' ? clampQuantity(current + 1, max) : clampQuantity(current - 1, max);
       qtyEl.value = next;
     });
   });
 
   container.querySelectorAll('input.qty-input').forEach((input) => {
+    input.addEventListener('input', () => {
+      const max = Number(input.getAttribute('max')) || 999;
+      const val = clampQuantity(input.value, max);
+      input.value = String(val);
+      if (Number(input.value) >= max && Number(input.value) > 1) {
+        showToast(`Chỉ còn ${max} sản phẩm trong kho!`);
+      }
+    });
+
     input.addEventListener('change', () => {
       const max = Number(input.getAttribute('max')) || 999;
-      let val = Number(input.value);
-      if (isNaN(val) || val < 1) val = 1;
-      if (val > max) val = max;
-      input.value = val;
+      const val = clampQuantity(input.value, max);
+      input.value = String(val);
     });
   });
 }
@@ -278,7 +331,13 @@ function bindAddButtons(container) {
     button.addEventListener('click', () => {
       const id = button.dataset.add;
       const type = button.dataset.type;
-      const quantity = Number(document.querySelector(`input[data-qty="${id}"]`)?.value || 1);
+      const inputEl = document.querySelector(`input[data-qty="${id}"]`);
+      const max = Number(inputEl?.getAttribute('max')) || 999;
+      const quantity = clampQuantity(inputEl?.value || 1, max);
+
+      if (inputEl) {
+        inputEl.value = String(quantity);
+      }
 
       const source = type === 'ticket' ? appState.tickets : appState.merch;
       const item = source.find((entry) => entry.id === id);

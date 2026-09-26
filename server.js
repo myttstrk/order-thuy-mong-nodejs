@@ -691,6 +691,10 @@ app.post('/api/orders', async (req, res) => {
     type: item.type || 'ticket'
   }));
 
+  if (!items.length || items.some((item) => !item.id || !item.name || item.quantity <= 0 || item.price < 0)) {
+    return res.status(400).json({ message: 'Số lượng sản phẩm phải lớn hơn 0.' });
+  }
+
   const total = calculateOrderTotal(items);
   const orderCode = generateOrderCode();
   const now = new Date().toISOString();
