@@ -943,7 +943,25 @@ app.get('/api/orders/:orderCode/status', async (req, res) => {
     payment
   });
 });
+async function deleteOrderPersistent(orderCode) {
+  if (supabaseEnabled) {
+    try {
+      await supabaseRequest(`orders?order_code=eq.${encodeURIComponent(orderCode)}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.warn('[SUPABASE DELETE ERROR] Không thể xóa đơn trên Supabase:', err.message);
+    }
+  }
 
+  try {
+    const orders = readOrders();
+    const filteredOrders = orders.filter((o) => o.orderCode !== orderCode && o.id !== orderCode);
+    writeOrders(filteredOrders);
+  } catch (err) {
+    console.warn('[LOCAL DELETE ERROR] Không thể xóa đơn local:', err.message);
+  }
+}
 // POST /api/orders/:orderCode/cancel
 app.post('/api/orders/:orderCode/cancel', async (req, res) => {
   const { orderCode } = req.params;
@@ -953,35 +971,35 @@ app.post('/api/orders/:orderCode/cancel', async (req, res) => {
     return res.status(404).json({ message: 'Không tìm thấy đơn hàng.' });
   }
 
+  // Chặn không cho xóa đơn đã thanh toán thành công
   if (order.status === 'Đã thanh toán') {
-    return res.status(400).json({ message: 'Đơn hàng đã thanh toán thành công, không thể hủy.' });
+    return res.status(400).json({ message: 'Đơn hàng đã thanh toán thành công, không thể xóa/hủy.' });
   }
 
-  // 1. Cập nhật DB
-  order.status = 'Đã hủy';
-  await saveOrderPersistent(order);
-  inventoryCacheTime = 0;
+  // 1. XÓA HOÀN TOÀN KHỎI DATABASE (Supabase + Local JSON)
+  await deleteOrderPersistent(order.orderCode);
+  inventoryCacheTime = 0; // Reset cache tồn kho để nhả lại vé ngay lập tức
 
-  // 2. Đồng bộ sang Google Sheet - BẮT BUỘC DÙNG AWAIT TRÊN VERCEL
+  // 2. XÓA DÒNG KHỎI GOOGLE SHEET
   const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
   if (sheetWebhookUrl) {
     try {
       await fetchWithTimeout(sheetWebhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        redirect: 'follow', // Bắt buộc cho Apps Script 302
+        redirect: 'follow',
         body: JSON.stringify({
           action: 'CANCEL_ORDER',
           orderCode: order.orderCode
         })
       }, 7000);
-      console.log(`[CANCEL SUCCESS] Đã gửi lệnh xóa đơn ${order.orderCode} sang Google Sheet.`);
+      console.log(`[DELETE] Đã xóa đơn ${order.orderCode} khỏi Sheet.`);
     } catch (err) {
-      console.warn('[CANCEL ERROR] Lỗi xóa đơn trên Sheet:', err.message);
+      console.warn('[SHEET DELETE ERROR] Lỗi xóa dòng trên Sheet:', err.message);
     }
   }
 
-  return res.json({ success: true, message: 'Đã hủy đơn hàng thành công.' });
+  return res.json({ success: true, message: 'Đã hủy và xóa hoàn toàn đơn hàng.' });
 });
 // ==========================================
 // SEPAY WEBHOOK (XÁC NHẬN TIỀN VÀO)
