@@ -533,17 +533,22 @@ small {
   border-radius: 18px;
 }
 
-.payment-account-box h4 {
-  display: inline-block;
-  margin: 0 0 16px;
-  padding: 0.7rem 1.15rem;
+#payment-account-info.payment-account-box > h4 {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  max-width: 100%;
+  margin: 0 auto 16px;
+  padding: 0.72rem 1.15rem;
   border-radius: 999px;
   background: linear-gradient(135deg, #f1c66b, #d9a85c);
-  color: #17110e;
-  font-size: clamp(1.2rem, 2vw, 2.2rem);
-  font-weight: 900;
+  color: #17110e !important;
+  font-size: clamp(0.95rem, 1.7vw, 1.55rem) !important;
+  font-weight: 900 !important;
   line-height: 1.2;
   letter-spacing: 0.01em;
+  text-align: center;
 }
 
 .payment-account-box .payment-note {
@@ -672,14 +677,16 @@ small {
 
 .success-modal-card h3 {
   margin: 0 0 10px;
-  color: #1d1713;
+  color: #17110e;
   font-size: 1.8rem;
+  font-weight: 800;
 }
 
 .success-modal-card p {
   margin: 0;
-  color: rgba(29, 23, 19, 0.72);
+  color: #2f2925;
   line-height: 1.6;
+  font-weight: 600;
 }
 
 .success-modal-meta {
@@ -1551,15 +1558,15 @@ body .add-to-cart:hover {
 }
 
 .payment-note {
-  color: var(--muted);
+  color: #f4ead2;
   font-size: 0.96rem;
   font-weight: 700;
   line-height: 1.6;
 }
 
 .payment-success {
-  color: #70d49d;
-  font-weight: 700;
+  color: #1d1713;
+  font-weight: 800;
 }
 
 .cart-item {
