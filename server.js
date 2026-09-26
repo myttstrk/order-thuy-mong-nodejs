@@ -91,16 +91,15 @@ function saveItems(items) {
 async function readItemsPersistent() {
   const localItems = readItems();
 
+  if (Array.isArray(localItems) && localItems.length > 0) {
+    return localItems;
+  }
+
   if (!supabaseEnabled) return localItems;
 
   try {
     const rows = await supabaseRequest('items?select=item_data&order=updated_at.desc');
     const remoteItems = Array.isArray(rows) ? rows.map((row) => row.item_data).filter(Boolean) : [];
-
-    if (Array.isArray(localItems) && localItems.length > 0) {
-      return localItems;
-    }
-
     return remoteItems.length ? remoteItems : localItems;
   } catch (error) {
     console.warn('Supabase items read failed, falling back to local file store:', error.message);
@@ -232,6 +231,11 @@ async function supabaseRequest(pathname, options = {}) {
 
 async function readOrdersPersistent(timeoutMs = 2500) {
   const localOrders = readOrders();
+
+  if (Array.isArray(localOrders) && localOrders.length > 0) {
+    return localOrders;
+  }
+
   if (!supabaseEnabled) return localOrders;
 
   const controller = new AbortController();
@@ -262,6 +266,7 @@ async function readOrdersPersistent(timeoutMs = 2500) {
 
 async function findOrderPersistent(orderCode) {
   const localOrder = findOrderByCode(orderCode);
+  if (localOrder) return localOrder;
   if (!supabaseEnabled) return localOrder;
 
   try {
