@@ -540,13 +540,16 @@ small {
   border-radius: 999px;
   background: linear-gradient(135deg, #f1c66b, #d9a85c);
   color: #17110e;
-  font-size: clamp(1.1rem, 1.8vw, 2rem);
-  font-weight: 800;
+  font-size: clamp(1.2rem, 2vw, 2.2rem);
+  font-weight: 900;
   line-height: 1.2;
+  letter-spacing: 0.01em;
 }
 
 .payment-account-box .payment-note {
   margin-top: 14px;
+  font-weight: 700;
+  color: #f3e7c8;
 }
 
 .site-footer {
@@ -601,17 +604,18 @@ small {
 
 .toast-breadcrumb {
   color: #f1c66b;
-  font-weight: 700;
+  font-weight: 800;
   white-space: nowrap;
 }
 
 .toast-separator {
   color: rgba(246, 242, 234, 0.58);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .toast-text {
   color: #f6f2ea;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1548,7 +1552,9 @@ body .add-to-cart:hover {
 
 .payment-note {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.96rem;
+  font-weight: 700;
+  line-height: 1.6;
 }
 
 .payment-success {
