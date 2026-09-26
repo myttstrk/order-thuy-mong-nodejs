@@ -91,28 +91,28 @@ function saveItems(items) {
 async function readItemsPersistent() {
   const localItems = readItems();
 
-  if (Array.isArray(localItems) && localItems.length > 0) {
-    return localItems;
-  }
-
   if (!supabaseEnabled) return localItems;
 
   try {
     const rows = await supabaseRequest('items?select=item_data&order=updated_at.desc');
     const remoteItems = Array.isArray(rows) ? rows.map((row) => row.item_data).filter(Boolean) : [];
-    return remoteItems.length ? remoteItems : localItems;
+    if (remoteItems.length > 0) {
+      return remoteItems;
+    }
   } catch (error) {
     console.warn('Supabase items read failed, falling back to local file store:', error.message);
-    return localItems;
   }
+
+  return localItems;
 }
 
 async function saveItemsPersistent(items) {
-  const localSaved = saveItems(items);
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const localSaved = saveItems(normalizedItems);
+
   if (!supabaseEnabled) return localSaved;
 
   try {
-    const normalizedItems = Array.isArray(items) ? items : [];
     await Promise.all(normalizedItems.map((item) => supabaseRequest('items?on_conflict=item_id', {
       method: 'POST',
       headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
@@ -124,7 +124,7 @@ async function saveItemsPersistent(items) {
     })));
     return localSaved;
   } catch (error) {
-    console.warn('Supabase items sync failed; local file remains source of truth:', error.message);
+    console.warn('Supabase items sync failed; local file was still saved:', error.message);
     return localSaved;
   }
 }
@@ -232,10 +232,6 @@ async function supabaseRequest(pathname, options = {}) {
 async function readOrdersPersistent(timeoutMs = 2500) {
   const localOrders = readOrders();
 
-  if (Array.isArray(localOrders) && localOrders.length > 0) {
-    return localOrders;
-  }
-
   if (!supabaseEnabled) return localOrders;
 
   const controller = new AbortController();
@@ -266,7 +262,6 @@ async function readOrdersPersistent(timeoutMs = 2500) {
 
 async function findOrderPersistent(orderCode) {
   const localOrder = findOrderByCode(orderCode);
-  if (localOrder) return localOrder;
   if (!supabaseEnabled) return localOrder;
 
   try {
