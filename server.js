@@ -957,17 +957,18 @@ app.post('/api/orders/:orderCode/cancel', async (req, res) => {
     return res.status(400).json({ message: 'Đơn hàng đã thanh toán thành công, không thể hủy.' });
   }
 
-  // Cập nhật trạng thái 'Khách hủy' (không xóa dữ liệu để phục vụ lead chăm sóc)
-  order.status = 'Khách hủy';
+  // Trên DB lưu trạng thái Đã hủy để giải phóng giỏ hàng
+  order.status = 'Đã hủy';
   await saveOrderPersistent(order);
   inventoryCacheTime = 0;
 
-  // Báo sang Sheet đổi màu xám và cập nhật cột G
+  // Gửi lệnh xóa dòng này trên Google Sheet (vì khách chủ động hủy)
   const sheetWebhookUrl = process.env.GOOGLE_SHEET_WEBHOOK_URL;
   if (sheetWebhookUrl) {
     fetchWithTimeout(sheetWebhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      redirect: 'follow',
       body: JSON.stringify({
         action: 'CANCEL_ORDER',
         orderCode: order.orderCode
@@ -977,7 +978,6 @@ app.post('/api/orders/:orderCode/cancel', async (req, res) => {
 
   return res.json({ success: true, message: 'Đã hủy đơn hàng thành công.' });
 });
-
 // ==========================================
 // SEPAY WEBHOOK (XÁC NHẬN TIỀN VÀO)
 // ==========================================
