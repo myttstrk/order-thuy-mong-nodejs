@@ -201,6 +201,106 @@
       animation: errorShake 0.4s ease-in-out;
       border: 2px solid #dc3545 !important;
     }
+
+    /* Spinner Loading */
+    .loading-spinner {
+      display: inline-block;
+      width: 32px;
+      height: 32px;
+      border: 4px solid rgba(0, 0, 0, 0.1);
+      border-left-color: #071a1d;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 8px;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* Modal Popup Overlay */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      backdrop-filter: blur(3px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Modal Card */
+    .modal-content {
+      background: white;
+      width: 90%;
+      max-width: 420px;
+      border-radius: 16px;
+      padding: 24px;
+      text-align: center;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+      transform: translateY(20px) scale(0.95);
+      transition: transform 0.25s ease;
+    }
+
+    .modal-overlay.active .modal-content {
+      transform: translateY(0) scale(1);
+    }
+
+    .modal-icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+
+    .modal-title {
+      margin: 0 0 10px;
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    .modal-body {
+      font-size: 15px;
+      color: #444;
+      line-height: 1.5;
+      margin-bottom: 20px;
+      text-align: left;
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 8px;
+    }
+
+    .modal-btn {
+      background: #071a1d;
+      color: #f1c66b;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 15px;
+      width: 100%;
+    }
+
+    .modal-success .modal-title {
+      color: #2e7d32;
+    }
+
+    .modal-error .modal-title {
+      color: #d32f2f;
+    }
   </style>
 </head>
 
@@ -257,11 +357,25 @@
       </div>
     </div>
   </div>
-
+  <!-- POPUP MODAL THÔNG BÁO KẾT QUẢ CHECK-IN -->
+  <div id="checkin-modal" class="modal-overlay">
+    <div class="modal-content" id="modal-card">
+      <div id="modal-icon" class="modal-icon">⏳</div>
+      <h3 id="modal-title" class="modal-title">Đang kiểm tra...</h3>
+      <div id="modal-body" class="modal-body">
+        <div style="text-align: center; padding: 10px 0;">
+          <div class="loading-spinner"></div>
+          <p style="margin: 0; color: #666;">Đang xác thực thông tin vé...</p>
+        </div>
+      </div>
+      <button class="modal-btn" id="modal-close-btn" style="display: none;" onclick="closeModal()">Đóng / Quét
+        tiếp</button>
+    </div>
+  </div>
   <script>
     let scanner = null;
     let isScanning = true;
-
+    let modalTimer = null;
     function getAuthHeader() {
       const token = localStorage.getItem('tm_admin_token');
       return token ? { 'x-admin-token': token } : {};
@@ -307,89 +421,171 @@
       scanner.render(onScanSuccess);
     }
 
-// Hàm phát âm thanh Beep và rung điện thoại
-  function triggerFeedback(isSuccess = true) {
-    // 1. Rung thiết bị (Vibration API)
-    if (navigator.vibrate) {
-      if (isSuccess) {
-        // Rung nhẹ 1 nhịp 150ms khi thành công
-        navigator.vibrate(150);
-      } else {
-        // Rung 3 nhịp cảnh báo khi vé lỗi / vé đã dùng
-        navigator.vibrate([100, 80, 100, 80, 150]);
-      }
+    function closeModal() {
+      clearTimeout(modalTimer);
+      document.getElementById('checkin-modal').classList.remove('active');
+      setTimeout(() => { isScanning = true; }, 400);
     }
 
-    // 2. Phát tiếng bíp âm thanh (Web Audio API)
-    try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-
-      if (isSuccess) {
-        osc.frequency.setValueAtTime(880, audioCtx.currentTime); // Âm bíp cao vui tươi (880Hz)
-        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.12);
-      } else {
-        osc.frequency.setValueAtTime(300, audioCtx.currentTime); // Âm trầm cảnh báo (300Hz)
-        gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.25);
+    // Hàm phát Rung và Âm thanh
+    function triggerFeedback(isSuccess = true) {
+      if (navigator.vibrate) {
+        if (isSuccess) {
+          navigator.vibrate(180);
+        } else {
+          navigator.vibrate([120, 80, 120, 80, 180]);
+        }
       }
-    } catch (_) {}
-  }
 
-  async function onScanSuccess(decodedText) {
-    if (!isScanning) return;
-    isScanning = false;
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
 
-    const resBox = document.getElementById('scan-result');
-    const readerBox = document.getElementById('reader');
-    resBox.style.display = 'block';
+        if (isSuccess) {
+          osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.15);
+        } else {
+          osc.frequency.setValueAtTime(320, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.3);
+        }
+      } catch (_) { }
+    }
 
-    // Xóa class animation cũ
-    readerBox.classList.remove('scan-success-anim', 'scan-error-anim');
+    async function onScanSuccess(decodedText) {
+      if (!isScanning) return;
+      isScanning = false;
 
-    try {
-      const res = await fetch('/api/admin/checkin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ qrCode: decodedText })
-      });
+      // 1. Mở Modal hiển thị trạng thái Loading
+      const modal = document.getElementById('checkin-modal');
+      const modalCard = document.getElementById('modal-card');
+      const modalIcon = document.getElementById('modal-icon');
+      const modalTitle = document.getElementById('modal-title');
+      const modalBody = document.getElementById('modal-body');
+      const closeBtn = document.getElementById('modal-close-btn');
 
-      const data = await res.json();
-      if (res.ok) {
-        // Kích hoạt rung + âm bíp thành công
-        triggerFeedback(true);
-        readerBox.classList.add('scan-success-anim');
+      modalCard.className = 'modal-content';
+      modalIcon.innerHTML = '<div class="loading-spinner"></div>';
+      modalTitle.innerText = 'Đang kiểm tra...';
+      modalBody.innerHTML = '<p style="text-align:center; margin:0; color:#666;">Đang đối soát vé trên hệ thống...</p>';
+      closeBtn.style.display = 'none';
+      modal.classList.add('active');
 
-        resBox.className = 'success';
-        resBox.innerHTML = `<strong>✅ HỢP LỆ:</strong> ${data.order.customerName} - ${data.order.itemsStr}`;
-        loadHistory();
-      } else {
-        // Kích hoạt rung cảnh báo lỗi
+      // Chạy song song: gọi API và đảm bảo delay tối thiểu 1000ms (1 giây)
+      const startTime = Date.now();
+
+      try {
+        const fetchPromise = fetch('/api/admin/checkin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({ qrCode: decodedText })
+        }).then(async res => ({ status: res.status, ok: res.ok, data: await res.json() }));
+
+        const [resResult] = await Promise.all([
+          fetchPromise,
+          new Promise(resolve => setTimeout(resolve, 1000)) // Đảm bảo hiệu ứng xoay đúng 1s
+        ]);
+
+        const { ok, data } = resResult;
+
+        if (ok) {
+          // === CHECK-IN HỢP LỆ ===
+          triggerFeedback(true);
+          modalCard.classList.add('modal-success');
+          modalIcon.innerText = '✅';
+          modalTitle.innerText = 'CHECK-IN HỢP LỆ!';
+          modalBody.innerHTML = `
+          <p style="margin: 4px 0;"><strong>Khách hàng:</strong> ${data.order.customerName}</p>
+          <p style="margin: 4px 0;"><strong>Mã đơn:</strong> <span style="font-family: monospace;">${data.order.orderCode}</span></p>
+          <p style="margin: 4px 0;"><strong>Email:</strong> ${data.order.customerEmail || '—'}</p>
+          <p style="margin: 4px 0;"><strong>Mặt hàng:</strong> ${data.order.itemsStr}</p>
+          <p style="margin: 4px 0; color: #2e7d32; font-weight: bold;">Thời gian quét: ${new Date(data.order.checkedInAt).toLocaleTimeString('vi-VN')}</p>
+        `;
+          loadHistory();
+        } else {
+          // === KHÔNG HỢP LỆ / ĐÃ SỬ DỤNG ===
+          triggerFeedback(false);
+          modalCard.classList.add('modal-error');
+          modalIcon.innerText = '❌';
+          modalTitle.innerText = 'VÉ KHÔNG HỢP LỆ!';
+          modalBody.innerHTML = `
+          <p style="color: #c62828; font-weight: bold; margin: 4px 0;">${data.message}</p>
+          ${data.order ? `
+            <hr style="border:none; border-top:1px dashed #ccc; margin:8px 0;">
+            <p style="margin: 4px 0; font-size: 13px;"><strong>Khách:</strong> ${data.order.customer?.name || ''}</p>
+            <p style="margin: 4px 0; font-size: 13px;"><strong>Mã:</strong> ${data.order.orderCode}</p>
+          ` : ''}
+        `;
+        }
+      } catch (err) {
+        triggerFeedback(false);
+        modalCard.classList.add('modal-error');
+        modalIcon.innerText = '⚠️';
+        modalTitle.innerText = 'LỖI KẾT NỐI!';
+        modalBody.innerHTML = `<p style="color: red; margin: 0;">${err.message}</p>`;
+      }
+
+      closeBtn.style.display = 'block';
+
+      // Tự động đóng popup sau 3.5 giây để tiếp tục quét người kế tiếp
+      modalTimer = setTimeout(() => {
+        closeModal();
+      }, 3500);
+    }
+
+    async function onScanSuccess(decodedText) {
+      if (!isScanning) return;
+      isScanning = false;
+
+      const resBox = document.getElementById('scan-result');
+      const readerBox = document.getElementById('reader');
+      resBox.style.display = 'block';
+
+      // Xóa class animation cũ
+      readerBox.classList.remove('scan-success-anim', 'scan-error-anim');
+
+      try {
+        const res = await fetch('/api/admin/checkin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({ qrCode: decodedText })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          // Kích hoạt rung + âm bíp thành công
+          triggerFeedback(true);
+          readerBox.classList.add('scan-success-anim');
+
+          resBox.className = 'success';
+          resBox.innerHTML = `<strong>✅ HỢP LỆ:</strong> ${data.order.customerName} - ${data.order.itemsStr}`;
+          loadHistory();
+        } else {
+          // Kích hoạt rung cảnh báo lỗi
+          triggerFeedback(false);
+          readerBox.classList.add('scan-error-anim');
+
+          resBox.className = 'error';
+          resBox.innerHTML = `<strong>❌ KHÔNG HỢP LỆ:</strong> ${data.message}`;
+        }
+      } catch (e) {
         triggerFeedback(false);
         readerBox.classList.add('scan-error-anim');
-
         resBox.className = 'error';
-        resBox.innerHTML = `<strong>❌ KHÔNG HỢP LỆ:</strong> ${data.message}`;
+        resBox.innerText = 'Lỗi kết nối: ' + e.message;
       }
-    } catch (e) {
-      triggerFeedback(false);
-      readerBox.classList.add('scan-error-anim');
-      resBox.className = 'error';
-      resBox.innerText = 'Lỗi kết nối: ' + e.message;
-    }
 
-    setTimeout(() => {
-      readerBox.classList.remove('scan-success-anim', 'scan-error-anim');
-      isScanning = true;
-    }, 2500);
-  }
+      setTimeout(() => {
+        readerBox.classList.remove('scan-success-anim', 'scan-error-anim');
+        isScanning = true;
+      }, 2500);
+    }
 
     async function loadHistory() {
       try {
