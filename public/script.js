@@ -47,15 +47,39 @@ function startExpiryCountdown(expiresAt, container = document.getElementById('pa
 
   const updateCountdown = () => {
     const remainingMs = targetTime - Date.now();
-    if (!countdownEl) return;
 
+    // KHI ĐÃ HẾT 15 PHÚT
     if (remainingMs <= 0) {
-      countdownEl.textContent = 'Hết thời gian thanh toán: 00:00';
       clearInterval(appState.paymentExpiryTimer);
+      clearInterval(appState.paymentPollTimer); // Dừng polling API lên server
+      clearPendingOrder(); // Xóa sạch LocalStorage
+
+      // Cập nhật lại box thanh toán: báo hết hạn và cho phép đặt lại
+      container.innerHTML = `
+        <div class="expired-order-box" style="padding: 20px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 10px; text-align: center;">
+          <div style="font-size: 36px; margin-bottom: 8px;">⏳</div>
+          <h4 style="color: #c53030; margin: 0 0 8px;">Thời gian giữ vé đã kết thúc</h4>
+          <p style="color: #4a5568; font-size: 14px; margin-bottom: 16px;">Đơn hàng của bạn đã hết hạn do quá 15 phút chưa hoàn tất chuyển khoản. Vé đã được nhả lại vào kho.</p>
+          <button type="button" class="btn btn-primary" id="btn-reorder" style="padding: 10px 20px; font-weight: bold; border-radius: 8px; cursor: pointer;">
+            Đặt đơn mới
+          </button>
+        </div>
+      `;
+
+      const reorderBtn = document.getElementById('btn-reorder');
+      if (reorderBtn) {
+        reorderBtn.addEventListener('click', () => {
+          document.getElementById('tickets')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+
+      showToast('Đơn hàng đã hết hạn giữ vé.');
       return;
     }
 
-    countdownEl.textContent = `Thời gian giữ vé: ${formatCountdownMs(remainingMs)}`;
+    if (countdownEl) {
+      countdownEl.textContent = `Thời gian giữ vé: ${formatCountdownMs(remainingMs)}`;
+    }
   };
 
   updateCountdown();
