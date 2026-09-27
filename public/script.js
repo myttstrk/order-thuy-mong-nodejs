@@ -29,7 +29,18 @@ function showToast(message) {
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 2200);
 }
+function toggleCheckoutSubmitButton(hasPendingOrder = false) {
+  const submitBtn = checkoutForm?.querySelector('button[type="submit"]');
+  if (!submitBtn) return;
 
+  if (hasPendingOrder) {
+    submitBtn.style.display = 'none'; // Ẩn nút tạo đơn khi đang có đơn chờ
+  } else {
+    submitBtn.style.display = ''; // Hiện lại nút khi đơn bị hủy hoặc hết hạn
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Thanh toán bằng QR';
+  }
+}
 function formatCountdownMs(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -51,9 +62,9 @@ function startExpiryCountdown(expiresAt, container = document.getElementById('pa
     // KHI ĐÃ HẾT 15 PHÚT
     if (remainingMs <= 0) {
       clearInterval(appState.paymentExpiryTimer);
-      clearInterval(appState.paymentPollTimer); // Dừng polling API lên server
-      clearPendingOrder(); // Xóa sạch LocalStorage
-
+      clearInterval(appState.paymentPollTimer);
+      clearPendingOrder();
+      toggleCheckoutSubmitButton(false);
       // Cập nhật lại box thanh toán: báo hết hạn và cho phép đặt lại
       container.innerHTML = `
         <div class="expired-order-box" style="padding: 20px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 10px; text-align: center;">
@@ -165,11 +176,11 @@ async function restorePendingOrderFromStorage() {
 
   try {
     const response = await fetch(`/api/orders/${encodeURIComponent(stored.orderCode)}/status${stored.email ? `?email=${encodeURIComponent(stored.email)}` : ''}`);
-    
+
     // NẾU BỊ RATE LIMIT (429) HOẶC LỖI SERVER (500) -> GIỮ NGUYÊN LOCALSTORAGE, KHÔNG XÓA!
     if (response.status === 429 || response.status >= 500) {
       console.warn('Hệ thống đang bận hoặc thao tác quá nhanh, giữ lại đơn pending.');
-      return; 
+      return;
     }
 
     const result = await response.json();
@@ -190,7 +201,9 @@ async function restorePendingOrderFromStorage() {
       return;
     }
 
-    // Đơn hợp lệ -> Mở popup
+    // Đang có đơn còn hạn -> Mở popup và ẩn nút đặt vé
+    toggleCheckoutSubmitButton(true);
+
     showPendingOrderRecoveryModal({
       orderCode: result.order.orderCode,
       email: stored.email || result.order.customer?.email || '',
@@ -205,6 +218,8 @@ async function restorePendingOrderFromStorage() {
 }
 async function continuePendingOrder(orderCode, email) {
   hidePendingOrderRecoveryModal();
+  toggleCheckoutSubmitButton(true);
+
   const paymentInfoEl = document.getElementById('payment-account-info');
   if (paymentInfoEl) {
     paymentInfoEl.innerHTML = '<p>Đang tải thông tin đơn đang chờ thanh toán...</p>';
@@ -217,6 +232,7 @@ async function continuePendingOrder(orderCode, email) {
 
     if (result.order.status !== 'Chờ thanh toán') {
       clearPendingOrder();
+      toggleCheckoutSubmitButton(false);
       return;
     }
 
@@ -243,9 +259,15 @@ async function continuePendingOrder(orderCode, email) {
       startExpiryCountdown(result.order.expiresAt, paymentInfoEl);
       savePendingOrder(result.order);
       startPaymentStatusPolling(result.order.orderCode, result.order.customer?.email || '');
+
+      // Focus và cuộn khung QR vào giữa màn hình
+      paymentInfoEl.setAttribute('tabindex', '-1');
+      paymentInfoEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      paymentInfoEl.focus({ preventScroll: true });
     }
   } catch (error) {
     clearPendingOrder();
+    toggleCheckoutSubmitButton(false);
     showToast(error.message || 'Không thể tiếp tục đơn chờ thanh toán.');
   }
 }
@@ -275,7 +297,9 @@ async function cancelPendingOrder(orderCode) {
     clearInterval(appState.paymentExpiryTimer);
     clearPendingOrder();
     hidePendingOrderRecoveryModal();
-
+    toggleCheckoutSubmitButton(false);
+    clearPendingOrder();
+    hidePendingOrderRecoveryModal();
     const paymentInfoEl = document.getElementById('payment-account-info');
     if (paymentInfoEl) {
       paymentInfoEl.innerHTML = `
@@ -1017,6 +1041,7 @@ checkoutForm.addEventListener('submit', async (event) => {
 
             btnConfirmPayment.style.display = 'none';
             clearPendingOrder();
+            toggleCheckoutSubmitButton(false);
             showToast('Đã gửi xác nhận thanh toán!');
             showPaymentSuccessModal(result.order);
 
@@ -1034,13 +1059,18 @@ checkoutForm.addEventListener('submit', async (event) => {
           }
         });
       }
+
+      // Focus và cuộn trực tiếp vào khối QR
+      paymentInfoEl.setAttribute('tabindex', '-1');
+      paymentInfoEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      paymentInfoEl.focus({ preventScroll: true });
     }
+
     startPaymentStatusPolling(result.order.orderCode, result.order.customer.email || '');
     showToast('Đơn hàng đã tạo. Vui lòng quét QR để thanh toán.');
-    if (submitBtn) {
-      submitBtn.textContent = 'Kéo xuống dưới để quét QR';
-    }
-    document.getElementById('checkout').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    // Ẩn nút tạo đơn khi đã có đơn chờ thanh toán
+    toggleCheckoutSubmitButton(true);
   } catch (error) {
     if (submitBtn) {
       submitBtn.disabled = false;
@@ -1048,7 +1078,7 @@ checkoutForm.addEventListener('submit', async (event) => {
     }
     showToast(error.message || 'Có lỗi xảy ra khi đặt vé.');
   }
-});
+}); 
 
 const navBookButton = document.getElementById('nav-book-button');
 if (navBookButton) {
@@ -1065,16 +1095,16 @@ document.querySelectorAll('[data-close-pending-order]').forEach((el) => {
   el.addEventListener('click', hidePendingOrderRecoveryModal);
 });
 
-const pendingOrderContinueBtn = document.getElementById('pending-order-continue');
+const pendingOrderContinueBtn = document.getElementById('pending-order-continue-btn') || document.getElementById('pending-order-continue');
 if (pendingOrderContinueBtn) {
   pendingOrderContinueBtn.addEventListener('click', async () => {
-    const stored = getStoredPendingOrder();
-    if (!stored?.orderCode) {
+    const order = appState.pendingOrderRecovery || getStoredPendingOrder();
+    if (!order?.orderCode) {
       hidePendingOrderRecoveryModal();
       return;
     }
 
-    await continuePendingOrder(stored.orderCode, stored.email || '');
+    await continuePendingOrder(order.orderCode, order.email || '');
   });
 }
 
@@ -1093,6 +1123,7 @@ if (pendingOrderCancelBtn) {
       } else {
         clearPendingOrder();
         hidePendingOrderRecoveryModal();
+        toggleCheckoutSubmitButton(false);
       }
     } finally {
       pendingOrderCancelBtn.disabled = false;
