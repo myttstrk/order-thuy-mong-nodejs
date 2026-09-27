@@ -133,7 +133,7 @@ async function restorePendingOrderFromStorage() {
   const stored = getStoredPendingOrder();
   if (!stored?.orderCode) return;
 
-  // 1. Kiểm tra nhanh ở LocalStorage: Nếu đã hết hạn từ trước -> xóa luôn
+  // 1. Chỉ tự xóa nếu thời gian lưu cục bộ đã quá hạn
   if (stored.expiresAt && new Date(stored.expiresAt).getTime() <= Date.now()) {
     clearPendingOrder();
     return;
@@ -141,30 +141,42 @@ async function restorePendingOrderFromStorage() {
 
   try {
     const response = await fetch(`/api/orders/${encodeURIComponent(stored.orderCode)}/status${stored.email ? `?email=${encodeURIComponent(stored.email)}` : ''}`);
+    
+    // NẾU BỊ RATE LIMIT (429) HOẶC LỖI SERVER (500) -> GIỮ NGUYÊN LOCALSTORAGE, KHÔNG XÓA!
+    if (response.status === 429 || response.status >= 500) {
+      console.warn('Hệ thống đang bận hoặc thao tác quá nhanh, giữ lại đơn pending.');
+      return; 
+    }
+
     const result = await response.json();
 
+    // Nếu đơn thực sự không tồn tại (404) hoặc không còn 'Chờ thanh toán' -> Mới xóa
     if (!response.ok || !result.order) {
-      clearPendingOrder();
+      if (response.status === 404) {
+        clearPendingOrder();
+      }
       return;
     }
 
     const expiresAtMs = new Date(result.order.expiresAt || stored.expiresAt).getTime();
 
-    // 2. Kiểm tra lại với thời gian chuẩn từ Server: Nếu đã hết hạn hoặc không còn Chờ thanh toán -> Xóa ngay
+    // Nếu server báo đơn đã thanh toán hoặc đã hủy/hết hạn -> Xóa
     if (result.order.status !== 'Chờ thanh toán' || expiresAtMs <= Date.now()) {
       clearPendingOrder();
       return;
     }
 
-    // Đơn thực sự còn hạn -> Mới hiện popup
+    // Đơn hợp lệ -> Mở popup
     showPendingOrderRecoveryModal({
       orderCode: result.order.orderCode,
       email: stored.email || result.order.customer?.email || '',
       expiresAt: result.order.expiresAt || stored.expiresAt || null,
       status: result.order.status
     });
+
   } catch (error) {
-    clearPendingOrder();
+    // Lỗi mạng hoặc lag: TUYỆT ĐỐI KHÔNG XÓA LOCALSTORAGE CỦA KHÁCH
+    console.warn('Lỗi kết nối khi phục hồi đơn pending:', error);
   }
 }
 async function continuePendingOrder(orderCode, email) {
